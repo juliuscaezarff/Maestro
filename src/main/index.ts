@@ -659,8 +659,8 @@ if (gotTheLock) {
             { type: "separator" },
             {
               label: isCliInstalled()
-                ? "Uninstall '1code' Command..."
-                : "Install '1code' Command in PATH...",
+                ? "Uninstall 'maestro' Command..."
+                : "Install 'maestro' Command in PATH...",
               ...(terminalMenuIcon && { icon: terminalMenuIcon }),
               click: async () => {
                 const { dialog } = await import("electron")
@@ -670,7 +670,7 @@ if (gotTheLock) {
                     dialog.showMessageBox({
                       type: "info",
                       message: "CLI command uninstalled",
-                      detail: "The '1code' command has been removed from your PATH.",
+                      detail: "The 'maestro' command has been removed from your PATH.",
                     })
                     buildMenu()
                   } else {
