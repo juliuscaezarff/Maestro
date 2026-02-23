@@ -30,14 +30,51 @@ function spawnAsync(command: string, args: string[]): Promise<void> {
 	});
 }
 
+// CLI commands for Windows (most editors register these in PATH during installation)
+const WINDOWS_CLI: Partial<Record<ExternalApp, string>> = {
+	cursor: "cursor",
+	vscode: "code",
+	"vscode-insiders": "code-insiders",
+	zed: "zed",
+	windsurf: "windsurf",
+	sublime: "subl",
+	warp: "warp",
+	ghostty: "ghostty",
+	trae: "trae",
+	terminal: "wt", // Windows Terminal
+	intellij: "idea",
+	webstorm: "webstorm",
+	pycharm: "pycharm",
+	phpstorm: "phpstorm",
+	rubymine: "rubymine",
+	goland: "goland",
+	clion: "clion",
+	rider: "rider",
+	datagrip: "datagrip",
+	fleet: "fleet",
+	rustrover: "rustrover",
+}
+
 function openPathInApp(app: ExternalApp, targetPath: string): Promise<void> {
 	const expandedPath = expandTilde(targetPath);
 
+	// Finder / Explorer — works cross-platform via Electron
 	if (app === "finder") {
 		shell.showItemInFolder(expandedPath);
 		return Promise.resolve();
 	}
 
+	// Windows
+	if (os.platform() === "win32") {
+		const cmd = WINDOWS_CLI[app];
+		if (cmd) {
+			return spawnAsync(cmd, [expandedPath]);
+		}
+		// Fallback: open with default associated app
+		return shell.openPath(expandedPath).then(() => {});
+	}
+
+	// macOS
 	const meta = APP_META[app];
 	return spawnAsync("open", ["-a", meta.macAppName, expandedPath]);
 }
@@ -98,7 +135,8 @@ export const externalRouter = router({
 			for (const editor of editors) {
 				try {
 					// Check if the command exists first
-					execFileSync("which", [editor.cmd], { stdio: "ignore" });
+					const checkCmd = os.platform() === "win32" ? "where" : "which";
+					execFileSync(checkCmd, [editor.cmd], { stdio: "ignore" });
 					const child = spawn(editor.cmd, editor.args, {
 						cwd: cwd || undefined,
 						detached: true,
