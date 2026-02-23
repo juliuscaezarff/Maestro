@@ -1588,7 +1588,7 @@ const SidebarHeader = memo(function SidebarHeader({
                 >
                   <div className="flex items-center gap-1.5 min-w-0 max-w-full">
                     <div className="flex items-center justify-center flex-shrink-0">
-                      {/*<Logo className="w-3.5 h-3.5" />*/}
+                      <Logo className="w-5 h-5" />
                     </div>
                     <div className="min-w-0 flex-1 overflow-hidden">
                       <div className="text-sm font-medium text-foreground truncate">
@@ -1624,7 +1624,7 @@ const SidebarHeader = memo(function SidebarHeader({
                       <div className="relative pl-2 pt-1.5 pb-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <div className="w-8 h-8 rounded flex items-center justify-center bg-background flex-shrink-0 overflow-hidden">
-                            <Logo className="w-4 h-4" />
+                            <Logo className="w-7 h-7" />
                           </div>
                           <div className="flex-1 min-w-0 overflow-hidden">
                             <div className="font-medium text-sm text-foreground truncate">
