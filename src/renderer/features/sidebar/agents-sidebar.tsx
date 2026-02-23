@@ -1640,7 +1640,7 @@ const SidebarHeader = memo(function SidebarHeader({
 
                     {/* Settings */}
                     <DropdownMenuItem
-                      className="gap-2"
+                      className="gap-2 mt-1"
                       onSelect={() => {
                         setIsDropdownOpen(false);
                         setSettingsActiveTab("preferences");
