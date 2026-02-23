@@ -1639,7 +1639,7 @@ export function NewChatForm({
           {validatedProject && (
             <div className="text-center">
               <h1 className="text-2xl md:text-4xl font-medium tracking-tight">
-                What do you want to get done?
+                Let's Build
               </h1>
             </div>
           )}
