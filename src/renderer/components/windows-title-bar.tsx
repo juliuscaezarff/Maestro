@@ -70,20 +70,20 @@ export function WindowsTitleBar() {
 
   return (
     <div
-      className="h-8 flex-shrink-0 flex items-center justify-between bg-background border-b border-border/50"
+      className="h-8 flex-shrink-0 relative flex items-center bg-background border-b border-border/50"
       style={{
         // @ts-expect-error - WebKit-specific property for Electron window dragging
         WebkitAppRegion: "drag",
       }}
     >
-      {/* Left side - App title (draggable) */}
-      <div className="flex items-center gap-2 px-3 h-full">
+      {/* Centered title */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <span className="text-xs font-medium text-foreground/70">Maestro</span>
       </div>
 
       {/* Right side - Window controls (non-draggable) */}
       <div
-        className="flex items-center h-full"
+        className="flex items-center h-full ml-auto"
         style={{
           // @ts-expect-error - WebKit-specific property
           WebkitAppRegion: "no-drag",
