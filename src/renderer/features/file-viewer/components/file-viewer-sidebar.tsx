@@ -96,7 +96,7 @@ function FileViewerModeSwitcher({
           <CurrentIcon className="size-4 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[140px]">
+      <DropdownMenuContent align="start" className="min-w-[140px] z-[200]">
         {FILE_VIEWER_MODES.map(({ value, label, Icon }) => (
           <DropdownMenuItem
             key={value}
@@ -207,9 +207,10 @@ function CodeViewerHeader({
   const openInEditorHotkey = useResolvedHotkeyDisplay("open-file-in-editor")
 
   const handleOpenInEditor = useCallback(() => {
-    const absolutePath = filePath.startsWith("/") ? filePath : undefined
-    if (absolutePath) {
-      openInAppMutation.mutate({ path: absolutePath, app: preferredEditor })
+    // Accept both Unix (/path) and Windows (C:\path) absolute paths
+    const isAbsolute = filePath.startsWith("/") || /^[A-Za-z]:[/\\]/.test(filePath)
+    if (isAbsolute) {
+      openInAppMutation.mutate({ path: filePath, app: preferredEditor })
     }
   }, [filePath, preferredEditor, openInAppMutation])
 
@@ -291,7 +292,7 @@ function CodeViewerHeader({
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuContent align="end" className="w-48 z-[200]">
             <DropdownMenuCheckboxItem
               checked={wordWrap}
               onCheckedChange={() => setWordWrap(!wordWrap)}
