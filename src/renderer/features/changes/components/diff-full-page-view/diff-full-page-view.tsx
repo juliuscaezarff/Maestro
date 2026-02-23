@@ -41,6 +41,7 @@ export function DiffFullPageView({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15, ease: [0.4, 0, 0.2, 1] }}
           className="fixed inset-0 z-50 bg-background flex flex-col"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
           {children}
         </motion.div>
