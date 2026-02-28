@@ -661,99 +661,99 @@ export function AgentsPluginsTab() {
 
   return (
     <div className="h-full overflow-y-auto" ref={contentRef}>
-      <div className="max-w-[900px] mx-auto flex gap-0 px-6 pt-20 pb-8">
-        {/* ── Left nav ── */}
-        <div className="w-[160px] shrink-0 pr-6 pt-1">
-          <p className="text-[12px] text-muted-foreground/40 mb-4">Plugins</p>
-          <nav className="flex flex-col">
-            {isLoading
-              ? Array.from({ length: 6 }, (_, i) => (
-                  <div
-                    key={i}
-                    className="h-[22px] mb-1 rounded bg-muted animate-pulse"
-                    style={{ width: `${55 + ((i * 19) % 35)}%` }}
-                  />
-                ))
-              : categories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => handleCategoryClick(cat.id)}
-                    className={cn(
-                      "text-left text-[13px] py-[4px] leading-snug transition-colors duration-100 hover:text-foreground",
-                      activeCategory === cat.id
-                        ? "text-foreground"
-                        : "text-muted-foreground/55",
-                    )}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
-          </nav>
-        </div>
-
-        {/* ── Main content ── */}
-        <div className="flex-1 min-w-0">
-          {/* Search */}
-          <div className="mb-5">
-            <input
-              ref={searchInputRef}
-              placeholder="Search skills, rules, subagents, MCPs, and hooks"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-[34px] rounded-md bg-transparent border border-border px-3 text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-ring transition-colors"
-            />
-          </div>
-
-          {/* Grid */}
-          {isLoading ? (
-            <div className="flex items-center justify-center h-24">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/30" />
-            </div>
-          ) : plugins.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <PluginFilledIcon className="h-9 w-9 text-muted-foreground/20 mb-3" />
-              <p className="text-[13px] text-muted-foreground/50 mb-1">
-                No plugins installed
-              </p>
-              <p className="text-xs text-muted-foreground/30">
-                Install plugins to ~/.claude/plugins/marketplaces/
-              </p>
-            </div>
-          ) : filteredPlugins.length === 0 ? (
-            <div className="flex items-center justify-center py-16">
-              <p className="text-[13px] text-muted-foreground/40">
-                No results found
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {sections.map((section) => (
+      <div className="max-w-[900px] mx-auto px-6 pt-20 pb-8 flex">
+      {/* ── Left nav (sticky, never scrolls) ── */}
+      <div className="w-[160px] shrink-0 pr-6 pt-1 sticky top-5 self-start">
+        <p className="text-[12px] text-muted-foreground/40 mb-4">Plugins</p>
+        <nav className="flex flex-col">
+          {isLoading
+            ? Array.from({ length: 6 }, (_, i) => (
                 <div
-                  key={section.id}
-                  ref={(el) => {
-                    sectionRefs.current[section.id] = el;
-                  }}
+                  key={i}
+                  className="h-[22px] mb-1 rounded bg-muted animate-pulse"
+                  style={{ width: `${55 + ((i * 19) % 35)}%` }}
+                />
+              ))
+            : categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => handleCategoryClick(cat.id)}
+                  className={cn(
+                    "text-left text-[13px] py-[4px] leading-snug transition-colors duration-100 hover:text-foreground",
+                    activeCategory === cat.id
+                      ? "text-foreground"
+                      : "text-muted-foreground/55",
+                  )}
                 >
-                  {/* Section label */}
-                  <p className="text-[12px] text-muted-foreground/40 mb-3">
-                    {capitalize(section.label)}
-                  </p>
-
-                  {/* Card grid with gap spacing */}
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {section.plugins.map((plugin) => (
-                      <PluginCard
-                        key={plugin.source}
-                        plugin={plugin}
-                        onClick={() => setSelectedPluginSource(plugin.source)}
-                      />
-                    ))}
-                  </div>
-                </div>
+                  {cat.label}
+                </button>
               ))}
-            </div>
-          )}
+        </nav>
+      </div>
+
+      {/* ── Main content ── */}
+      <div className="flex-1 min-w-0">
+        {/* Search */}
+        <div className="mb-5">
+          <input
+            ref={searchInputRef}
+            placeholder="Search skills, rules, subagents, MCPs, and hooks"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full h-[34px] rounded-md bg-transparent border border-border px-3 text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-ring transition-colors"
+          />
         </div>
+
+        {/* Grid */}
+        {isLoading ? (
+          <div className="flex items-center justify-center h-24">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/30" />
+          </div>
+        ) : plugins.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <PluginFilledIcon className="h-9 w-9 text-muted-foreground/20 mb-3" />
+            <p className="text-[13px] text-muted-foreground/50 mb-1">
+              No plugins installed
+            </p>
+            <p className="text-xs text-muted-foreground/30">
+              Install plugins to ~/.claude/plugins/marketplaces/
+            </p>
+          </div>
+        ) : filteredPlugins.length === 0 ? (
+          <div className="flex items-center justify-center py-16">
+            <p className="text-[13px] text-muted-foreground/40">
+              No results found
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {sections.map((section) => (
+              <div
+                key={section.id}
+                ref={(el) => {
+                  sectionRefs.current[section.id] = el;
+                }}
+              >
+                {/* Section label */}
+                <p className="text-[12px] text-muted-foreground/40 mb-3">
+                  {capitalize(section.label)}
+                </p>
+
+                {/* Card grid with gap spacing */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  {section.plugins.map((plugin) => (
+                    <PluginCard
+                      key={plugin.source}
+                      plugin={plugin}
+                      onClick={() => setSelectedPluginSource(plugin.source)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       </div>
     </div>
   );
