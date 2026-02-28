@@ -187,7 +187,7 @@ function PluginCard({
   return (
     <button
       onClick={onClick}
-      className="group flex items-center gap-3 px-4 py-3.5 w-full text-left rounded-lg border border-white/[0.06] hover:bg-white/[0.03] hover:border-white/[0.10] transition-colors duration-100"
+      className="group flex items-center gap-3 px-4 py-3.5 w-full text-left rounded-lg border border-border hover:bg-accent/50 hover:border-border transition-colors duration-100"
     >
       <PluginIcon name={plugin.name} />
       <div className="min-w-0 flex-1">
@@ -315,7 +315,7 @@ function PluginDetail({
                   {plugin.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.06] text-muted-foreground"
+                      className="text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground"
                     >
                       {tag}
                     </span>
@@ -335,7 +335,7 @@ function PluginDetail({
                   <button
                     key={cmd.name}
                     onClick={() => onNavigateToTab("skills")}
-                    className="w-full flex items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2 hover:bg-white/[0.07] transition-colors text-left group"
+                    className="w-full flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 hover:bg-muted transition-colors text-left group"
                   >
                     <Terminal className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
                     <p className="text-xs font-mono text-foreground flex-1">
@@ -358,7 +358,7 @@ function PluginDetail({
                   <button
                     key={skill.name}
                     onClick={() => onNavigateToTab("skills")}
-                    className="w-full flex items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2 hover:bg-white/[0.07] transition-colors text-left group"
+                    className="w-full flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 hover:bg-muted transition-colors text-left group"
                   >
                     <SkillIconFilled className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
                     <p className="text-xs font-mono text-foreground flex-1">
@@ -381,7 +381,7 @@ function PluginDetail({
                   <button
                     key={agent.name}
                     onClick={() => onNavigateToTab("agents")}
-                    className="w-full flex items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2 hover:bg-white/[0.07] transition-colors text-left group"
+                    className="w-full flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 hover:bg-muted transition-colors text-left group"
                   >
                     <CustomAgentIconFilled className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
                     <p className="text-xs font-mono text-foreground flex-1">
@@ -405,7 +405,7 @@ function PluginDetail({
                   return (
                     <div
                       key={serverName}
-                      className="flex items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2"
+                      className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2"
                     >
                       <OriginalMCPIcon className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
                       <button
@@ -670,7 +670,7 @@ export function AgentsPluginsTab() {
               ? Array.from({ length: 6 }, (_, i) => (
                   <div
                     key={i}
-                    className="h-[22px] mb-1 rounded bg-white/[0.04] animate-pulse"
+                    className="h-[22px] mb-1 rounded bg-muted animate-pulse"
                     style={{ width: `${55 + ((i * 19) % 35)}%` }}
                   />
                 ))
@@ -700,7 +700,7 @@ export function AgentsPluginsTab() {
               placeholder="Search skills, rules, subagents, MCPs, and hooks"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-[34px] rounded-md bg-transparent border border-white/[0.10] px-3 text-[13px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-white/[0.20] transition-colors"
+              className="w-full h-[34px] rounded-md bg-transparent border border-border px-3 text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-ring transition-colors"
             />
           </div>
 
