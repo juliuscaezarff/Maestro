@@ -144,9 +144,9 @@
     "npmRebuild": true,
     "protocols": [
       {
-        "name": "1Code",
+        "name": "Maestro",
         "schemes": [
-          "twentyfirst-agents"
+          "maestro"
         ]
       }
     ],
