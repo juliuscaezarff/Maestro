@@ -42,7 +42,7 @@ import { IS_DEV, AUTH_SERVER_PORT } from "./constants"
 
 // Deep link protocol (must match package.json build.protocols.schemes)
 // Use different protocol in dev to avoid conflicts with production app
-const PROTOCOL = IS_DEV ? "twentyfirst-agents-dev" : "twentyfirst-agents"
+const PROTOCOL = IS_DEV ? "maestro-dev" : "maestro"
 
 // Set dev mode userData path BEFORE requestSingleInstanceLock()
 // This ensures dev and prod have separate instance locks
@@ -187,7 +187,7 @@ function handleDeepLink(url: string): void {
   try {
     const parsed = new URL(url)
 
-    // Handle auth callback: twentyfirst-agents://auth?code=xxx
+    // Handle auth callback: maestro://auth?code=xxx
     if (parsed.pathname === "/auth" || parsed.host === "auth") {
       const code = parsed.searchParams.get("code")
       if (code) {
@@ -196,7 +196,7 @@ function handleDeepLink(url: string): void {
       }
     }
 
-    // Handle MCP OAuth callback: twentyfirst-agents://mcp-oauth?code=xxx&state=yyy
+    // Handle MCP OAuth callback: maestro://mcp-oauth?code=xxx&state=yyy
     if (parsed.pathname === "/mcp-oauth" || parsed.host === "mcp-oauth") {
       const code = parsed.searchParams.get("code")
       const state = parsed.searchParams.get("state")
@@ -596,7 +596,7 @@ if (gotTheLock) {
       applicationName: "Maestro",
       applicationVersion: app.getVersion(),
       version: `Claude Code ${claudeCodeVersion}`,
-      copyright: "Copyright © 2026 21st.dev",
+      copyright: "Copyright © 2026 Maestro",
     })
 
     // Track update availability for menu
