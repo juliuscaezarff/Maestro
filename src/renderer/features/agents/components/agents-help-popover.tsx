@@ -71,7 +71,7 @@ export function AgentsHelpPopover({
   useEffect(() => {
     let cancelled = false
     window.desktopApi
-      .signedFetch("https://21st.dev/api/changelog/desktop?per_page=3")
+      .signedFetch("https://maestro-tawny-phi.vercel.app/api/changelog/desktop?per_page=3")
       .then((result) => {
         if (cancelled) return
         const data = result.data as {
