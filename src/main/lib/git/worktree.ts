@@ -1012,31 +1012,27 @@ export async function getWorktreeDiff(
 			});
 
 			// git diff --no-index only accepts 2 paths, so we need to diff each file separately
-			// Also, git diff --no-index returns exit code 1 when files differ, which simple-git treats as error
-			// So we use raw() to get the output regardless of exit code
+			// git diff --no-index always exits with code 1 when files differ — use execFileAsync
+			// so we reliably get stdout even on non-zero exit (simple-git only exposes stderr in error.message)
 			const untrackedDiffs: string[] = [];
 			for (const file of untrackedFiles) {
 				try {
-					const fileDiff = await git.raw([
+					const { stdout } = await execFileAsync("git", [
 						"diff",
 						"--no-color",
 						"--no-index",
 						devNull,
 						file,
-					]);
-					if (fileDiff) {
-						untrackedDiffs.push(fileDiff);
+					], { cwd: worktreePath });
+					if (stdout) {
+						untrackedDiffs.push(stdout);
 					}
 				} catch (error: unknown) {
-					// git diff --no-index returns exit code 1 when files differ
-					// simple-git throws but includes the diff output in the error
-					const gitError = error as { message?: string };
-					if (gitError.message && gitError.message.includes("diff --git")) {
-						// Extract the diff from the error message
-						const diffStart = gitError.message.indexOf("diff --git");
-						if (diffStart !== -1) {
-							untrackedDiffs.push(gitError.message.substring(diffStart));
-						}
+					// git diff --no-index exits with code 1 when files differ — that's expected
+					// execFileAsync puts stdout in error.stdout even on non-zero exit
+					const execError = error as { stdout?: string };
+					if (execError.stdout?.includes("diff --git")) {
+						untrackedDiffs.push(execError.stdout);
 					}
 				}
 			}
