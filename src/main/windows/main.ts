@@ -726,9 +726,7 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
   console.log("[Main] getUser():", user ? user.email : "null")
   console.log("[Main] ================================")
 
-  // TODO: Re-enable auth check when own backend is ready
-  // if (isAuth) {
-  if (true) {
+  if (isAuth) {
     console.log("[Main] ✓ User authenticated, loading app")
     // Get stable window ID from manager (assigned during register)
     // "main" for first window, "window-2", "window-3", etc. for additional windows
