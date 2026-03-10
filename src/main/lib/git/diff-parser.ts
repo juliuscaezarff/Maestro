@@ -67,10 +67,19 @@ const LANG_MAP: Record<string, string> = {
 }
 
 /**
+ * Check if a path refers to the null device (/dev/null on Unix, \\.\nul on Windows)
+ */
+function isNullDevice(p: string): boolean {
+  if (!p) return false
+  const lower = p.toLowerCase()
+  return lower === "/dev/null" || lower === "\\\\.\\nul" || lower === "nul"
+}
+
+/**
  * Get language identifier for syntax highlighting
  */
 export function getFileLang(filePath: string): string | null {
-  if (!filePath || filePath === "/dev/null") return null
+  if (!filePath || isNullDevice(filePath)) return null
   const ext = filePath.split(".").pop()?.toLowerCase() || ""
   return LANG_MAP[ext] || ext || null
 }
@@ -210,8 +219,8 @@ export function splitUnifiedDiffByFile(diffText: string): ParsedDiffFile[] {
     const validation = isBinary ? { valid: true } : validateDiffHunk(blockText)
     const isValid = validation.valid
 
-    const isNewFile = oldPath === "/dev/null"
-    const isDeletedFile = newPath === "/dev/null"
+    const isNewFile = isNullDevice(oldPath)
+    const isDeletedFile = isNullDevice(newPath)
 
     const actualPath = isNewFile ? newPath : isDeletedFile ? oldPath : newPath || oldPath
     const fileLang = getFileLang(actualPath)
