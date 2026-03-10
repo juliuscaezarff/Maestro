@@ -77,13 +77,13 @@ if (app.isPackaged && !IS_DEV) {
 // In dev mode, allow override via MAIN_VITE_API_URL env variable
 export function getBaseUrl(): string {
   if (app.isPackaged) {
-    return "https://21st.dev"
+    return "https://maestro-tawny-phi.vercel.app"
   }
-  return import.meta.env.MAIN_VITE_API_URL || "https://21st.dev"
+  return import.meta.env.MAIN_VITE_API_URL || "https://maestro-tawny-phi.vercel.app"
 }
 
 export function getAppUrl(): string {
-  return process.env.ELECTRON_RENDERER_URL || "https://21st.dev/agents"
+  return process.env.ELECTRON_RENDERER_URL || "https://maestro-tawny-phi.vercel.app"
 }
 
 // Auth manager singleton (use the one from auth-manager module)
