@@ -1,6 +1,6 @@
 import { Provider as JotaiProvider, useAtomValue, useSetAtom } from "jotai"
 import { ThemeProvider, useTheme } from "next-themes"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Toaster } from "sonner"
 import { TooltipProvider } from "./components/ui/tooltip"
 import { TRPCProvider } from "./contexts/TRPCProvider"
@@ -13,6 +13,7 @@ import {
   ApiKeyOnboardingPage,
   BillingMethodPage,
   CodexOnboardingPage,
+  LoginPage,
   SelectRepoPage,
 } from "./features/onboarding"
 import { identify, initAnalytics, shutdown } from "./lib/analytics"
@@ -45,6 +46,17 @@ function ThemedToaster() {
  * Main content router - decides which page to show based on onboarding state
  */
 function AppContent() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
+
+  // Check desktop auth on mount
+  useEffect(() => {
+    async function checkAuth() {
+      const user = await window.desktopApi?.getUser()
+      setIsAuthenticated(!!user)
+    }
+    checkAuth()
+  }, [])
+
   const billingMethod = useAtomValue(billingMethodAtom)
   const setBillingMethod = useSetAtom(billingMethodAtom)
   const anthropicOnboardingCompleted = useAtomValue(
@@ -129,12 +141,21 @@ function AppContent() {
   }, [selectedProject, projects, isLoadingProjects])
 
   // Determine which page to show:
+  // 0. Not signed in to Maestro account -> LoginPage
   // 1. No billing method selected -> BillingMethodPage
   // 2. Claude subscription selected but not completed -> AnthropicOnboardingPage
   // 3. Codex selected but not completed -> CodexOnboardingPage
   // 4. API key or custom model selected but not completed -> ApiKeyOnboardingPage
   // 5. No valid project selected -> SelectRepoPage
   // 6. Otherwise -> AgentsLayout
+  if (isAuthenticated === null) {
+    return null // loading
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />
+  }
+
   if (!billingMethod) {
     return <BillingMethodPage />
   }
