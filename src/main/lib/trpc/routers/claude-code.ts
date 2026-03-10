@@ -250,7 +250,8 @@ export const claudeCodeRouter = router({
       )
 
       if (!codeRes.ok) {
-        throw new Error(`Code submission failed: ${codeRes.statusText}`)
+        const errText = await codeRes.text().catch(() => codeRes.statusText)
+        throw new Error(`Code submission failed: ${errText}`)
       }
 
       // Poll for OAuth token (max 10 seconds)
@@ -282,8 +283,6 @@ export const claudeCodeRouter = router({
       }
 
       storeOAuthToken(oauthToken)
-
-      console.log("[ClaudeCode] Token stored locally")
       return { success: true }
     }),
 
