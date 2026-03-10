@@ -162,7 +162,9 @@ export class AuthManager {
     const now = Date.now()
 
     // Refresh 5 minutes before expiration
-    const refreshIn = Math.max(0, expiresAt - now - 5 * 60 * 1000)
+    // Cap at 24 hours to avoid 32-bit setTimeout overflow (max ~24.8 days)
+    const MAX_TIMEOUT = 24 * 60 * 60 * 1000
+    const refreshIn = Math.min(Math.max(0, expiresAt - now - 5 * 60 * 1000), MAX_TIMEOUT)
 
     this.refreshTimer = setTimeout(() => {
       this.refresh()
