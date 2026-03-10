@@ -1408,7 +1408,7 @@ const AutomationsButton = memo(function AutomationsButton() {
   const automationsEnabled = useAtomValue(betaAutomationsEnabledAtom);
 
   const handleClick = useCallback(() => {
-    window.desktopApi.openExternal("https://21st.dev/agents/app/automations");
+    window.desktopApi.openExternal("https://maestro-tawny-phi.vercel.app/agents/app/automations");
   }, []);
 
   if (!automationsEnabled) return null;
