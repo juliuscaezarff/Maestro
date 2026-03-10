@@ -14,7 +14,7 @@ let cachedApiBase: string | null = null
 
 async function getApiBase(): Promise<string> {
   if (!cachedApiBase) {
-    cachedApiBase = await window.desktopApi?.getApiBaseUrl() || "https://21st.dev"
+    cachedApiBase = await window.desktopApi?.getApiBaseUrl() || "https://maestro-tawny-phi.vercel.app"
   }
   return cachedApiBase
 }
