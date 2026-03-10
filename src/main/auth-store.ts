@@ -33,6 +33,9 @@ export class AuthStore {
    * Check if encryption is available on this system
    */
   private isEncryptionAvailable(): boolean {
+    // In dev mode on Windows, safeStorage can fail silently — use plaintext fallback
+    const isDev = !!process.env.ELECTRON_RENDERER_URL
+    if (isDev && process.platform === "win32") return false
     return safeStorage.isEncryptionAvailable()
   }
 
