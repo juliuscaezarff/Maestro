@@ -28,27 +28,25 @@ interface TreeProps extends React.HTMLAttributes<HTMLDivElement> {
   tree?: any
 }
 
-function Tree({ indent = 20, tree, className, ...props }: TreeProps) {
+function Tree({ indent = 20, tree, className, style, ...props }: TreeProps) {
   const containerProps =
     tree && typeof tree.getContainerProps === "function"
       ? tree.getContainerProps()
       : {}
-  const mergedProps = { ...props, ...containerProps }
 
-  const { style: propStyle, ...otherProps } = mergedProps
-
-  const mergedStyle = {
-    ...propStyle,
-    "--tree-indent": `${indent}px`,
-  } as React.CSSProperties
+  const { style: containerStyle, ...otherContainerProps } = containerProps
 
   return (
     <TreeContext.Provider value={{ indent, tree }}>
       <div
         className={cn("flex flex-col", className)}
         data-slot="tree"
-        style={mergedStyle}
-        {...otherProps}
+        style={{
+          ...style,
+          ...containerStyle,
+        } as React.CSSProperties}
+        {...props}
+        {...otherContainerProps}
       />
     </TreeContext.Provider>
   )
@@ -57,7 +55,6 @@ function Tree({ indent = 20, tree, className, ...props }: TreeProps) {
 interface TreeItemProps<T = any>
   extends React.HTMLAttributes<HTMLButtonElement> {
   item: ItemInstance<T>
-  indent?: number
   asChild?: boolean
 }
 
@@ -66,19 +63,24 @@ function TreeItem<T = any>({
   className,
   asChild,
   children,
+  onClick,
+  style,
   ...props
 }: Omit<TreeItemProps<T>, "indent">) {
   const { indent } = useTreeContext<T>()
 
   const itemProps = typeof item.getProps === "function" ? item.getProps() : {}
-  const mergedProps = { ...props, ...itemProps }
 
-  const { style: propStyle, ...otherProps } = mergedProps
+  // Run both onClick handlers: headless-tree (selection/expand) + caller
+  const mergedOnClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    itemProps.onClick?.(e)
+    onClick?.(e as any)
+  }
 
-  const mergedStyle = {
-    ...propStyle,
-    "--tree-padding": `${item.getItemMeta().level * indent}px`,
-  } as React.CSSProperties
+  const { style: itemStyle, onClick: _itemClick, ...otherItemProps } = itemProps
+
+  const level = item.getItemMeta().level
+  const paddingLeft = level * indent
 
   const Comp = asChild ? Slot : ("button" as any)
 
@@ -87,7 +89,8 @@ function TreeItem<T = any>({
       <Comp
         aria-expanded={item.isExpanded()}
         className={cn(
-          "z-10 select-none ps-(--tree-padding) not-last:pb-0.5 outline-hidden focus:z-20 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+          "flex w-full select-none outline-hidden",
+          "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
           className,
         )}
         data-drag-target={
@@ -116,8 +119,10 @@ function TreeItem<T = any>({
             : undefined
         }
         data-slot="tree-item"
-        style={mergedStyle}
-        {...otherProps}
+        style={{ paddingLeft, ...itemStyle, ...style }}
+        onClick={mergedOnClick}
+        {...otherItemProps}
+        {...props}
       >
         {children}
       </Comp>
@@ -146,16 +151,26 @@ function TreeItemLabel<T = any>({
   return (
     <span
       className={cn(
-        "flex items-center gap-1 rounded-sm bg-background in-data-[drag-target=true]:bg-accent in-data-[search-match=true]:bg-blue-400/20! in-data-[selected=true]:bg-accent px-2 py-1.5 not-in-data-[folder=true]:ps-7 in-data-[selected=true]:text-accent-foreground text-sm in-focus-visible:ring-[3px] in-focus-visible:ring-ring/50 transition-colors hover:bg-accent [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-sm",
+        "transition-colors [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "hover:bg-accent/50",
+        "in-data-[selected=true]:bg-accent in-data-[selected=true]:text-accent-foreground",
+        "in-data-[drag-target=true]:bg-accent",
+        "in-data-[search-match=true]:bg-blue-400/20",
         className,
       )}
       data-slot="tree-item-label"
       {...props}
     >
       {item.isFolder() && (
-        <ChevronDownIcon className="in-aria-[expanded=false]:-rotate-90 size-4 text-muted-foreground" />
+        <ChevronDownIcon
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            !item.isExpanded() && "-rotate-90",
+          )}
+        />
       )}
-      {children ||
+      {children ??
         (typeof item.getItemName === "function" ? item.getItemName() : null)}
     </span>
   )
