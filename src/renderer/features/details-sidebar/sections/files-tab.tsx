@@ -1,9 +1,24 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, useMemo, memo, forwardRef, useImperativeHandle } from "react"
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  memo,
+  forwardRef,
+  useImperativeHandle,
+} from "react"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { atom } from "jotai"
-import { HiChevronRight } from "react-icons/hi2"
+import {
+  hotkeysCoreFeature,
+  syncDataLoaderFeature,
+  selectionFeature,
+} from "@headless-tree/core"
+import { useTree } from "@headless-tree/react"
+import { FileIcon, FolderIcon, FolderOpenIcon } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { trpc } from "@/lib/trpc"
@@ -15,6 +30,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import { Tree, TreeItem, TreeItemLabel } from "@/components/ui/tree"
 import { RenameDialog } from "@/components/rename-dialog"
 import { preferredEditorAtom } from "@/lib/atoms"
 import { getAppOption } from "@/components/open-in-button"
@@ -26,12 +42,12 @@ import { fileTreeExpandedAtomFamily } from "../atoms"
 // Types
 // ============================================================================
 
-interface FileTreeNode {
-  id: string
+interface FileTreeItem {
   name: string
-  type: "file" | "folder"
+  children?: string[]
+  /** full relative path, e.g. "src/app/page.tsx" */
   path: string
-  children?: FileTreeNode[]
+  type: "file" | "folder"
 }
 
 interface FilesTabProps {
@@ -50,730 +66,583 @@ export interface FilesTabHandle {
   isAllExpanded: boolean
 }
 
-const INDENT_PX = 12
-
 // Static noop atom to avoid creating a family entry for "__noop__"
 const noopExpandedAtom = atom<string[] | null, [string[]], void>(
   null,
-  () => {}, // noop write
+  () => {},
 )
+
+const INDENT = 16
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function buildFileTree(
+/**
+ * Build a flat item map + children list from file paths.
+ * Root node id = "__root__"
+ */
+function buildItemMap(
   files: Array<{ path: string; type: "file" | "folder" }>,
-): FileTreeNode[] {
-  type Internal = Omit<FileTreeNode, "children"> & {
-    children?: Record<string, Internal>
+): Record<string, FileTreeItem> {
+  const items: Record<string, FileTreeItem> = {
+    __root__: { name: "__root__", children: [], path: "", type: "folder" },
   }
-  const root: Record<string, Internal> = {}
+
   for (const file of files) {
     if (file.type !== "file") continue
     const parts = file.path.split("/")
-    let cur = root
     for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]!
       const isLast = i === parts.length - 1
       const pathSoFar = parts.slice(0, i + 1).join("/")
-      if (!cur[part]) {
-        cur[part] = {
-          id: pathSoFar,
-          name: part,
-          type: isLast ? "file" : "folder",
+      if (!items[pathSoFar]) {
+        items[pathSoFar] = {
+          name: parts[i]!,
           path: pathSoFar,
-          children: isLast ? undefined : {},
+          type: isLast ? "file" : "folder",
+          children: isLast ? undefined : [],
         }
       }
-      if (!isLast && cur[part]!.children) {
-        cur = cur[part]!.children!
+      // Add as child of parent
+      const parentKey = i === 0 ? "__root__" : parts.slice(0, i).join("/")
+      const parent = items[parentKey]
+      if (parent?.children && !parent.children.includes(pathSoFar)) {
+        parent.children.push(pathSoFar)
       }
     }
   }
-  function toArray(nodes: Record<string, Internal>): FileTreeNode[] {
-    return Object.values(nodes)
-      .map((n) => ({
-        ...n,
-        children: n.children ? toArray(n.children) : undefined,
-      }))
-      .sort((a, b) => {
-        if (a.type !== b.type) return a.type === "folder" ? -1 : 1
-        return a.name.localeCompare(b.name)
+
+  // Sort each folder's children: folders first, then alphabetically
+  for (const item of Object.values(items)) {
+    if (item.children) {
+      item.children.sort((a, b) => {
+        const ia = items[a]!
+        const ib = items[b]!
+        if (ia.type !== ib.type) return ia.type === "folder" ? -1 : 1
+        return ia.name.localeCompare(ib.name)
       })
+    }
   }
-  return toArray(root)
+
+  return items
 }
 
-function collectAllFolderPaths(nodes: FileTreeNode[]): Set<string> {
-  const s = new Set<string>()
-  ;(function walk(list: FileTreeNode[]) {
-    for (const n of list) {
-      if (n.type === "folder" && n.children) {
-        s.add(n.path)
-        walk(n.children)
-      }
-    }
-  })(nodes)
-  return s
-}
-
-function collectRootFolderPaths(nodes: FileTreeNode[]): Set<string> {
-  const s = new Set<string>()
-  for (const n of nodes) if (n.type === "folder") s.add(n.path)
-  return s
-}
-
-/** Flatten tree into visible-order list respecting expanded state */
-function flattenVisible(
-  nodes: FileTreeNode[],
-  expanded: Set<string>,
-): FileTreeNode[] {
-  const out: FileTreeNode[] = []
-  ;(function walk(list: FileTreeNode[]) {
-    for (const n of list) {
-      out.push(n)
-      if (n.type === "folder" && n.children && expanded.has(n.path))
-        walk(n.children)
-    }
-  })(nodes)
-  return out
-}
-
-function parentPath(p: string): string | null {
-  const i = p.lastIndexOf("/")
-  return i > 0 ? p.slice(0, i) : null
-}
-
-// ============================================================================
-// TreeNode — receives only primitive/stable props for effective memo
-// ============================================================================
-
-const TreeNode = memo(function TreeNode({
-  node,
-  level,
-  focusedPath,
-  activePath,
-  isExpanded,
-  editorLabel,
-  isPathExpanded,
-  onToggleExpand,
-  onActivate,
-  onFocus,
-  onContextAction,
-  treeRef,
-}: {
-  node: FileTreeNode
-  level: number
-  focusedPath: string | null
-  activePath: string | null
-  /** Whether THIS folder node is expanded (ignored for files) */
-  isExpanded: boolean
-  editorLabel: string
-  /** Callback to check if a child path is expanded */
-  isPathExpanded: (path: string) => boolean
-  onToggleExpand: (path: string) => void
-  onActivate: (path: string) => void
-  onFocus: (path: string) => void
-  onContextAction: (action: string, node: FileTreeNode) => void
-  treeRef: React.RefObject<HTMLDivElement | null>
-}) {
-  const isFolder = node.type === "folder" && !!node.children
-  const isFocused = focusedPath === node.path
-  const isActive = !isFocused && activePath === node.path
-  const rowRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (isFocused && rowRef.current) {
-      rowRef.current.scrollIntoView({ block: "nearest" })
-    }
-  }, [isFocused])
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    // Prevent this row from stealing DOM focus from the tree container
-    e.preventDefault()
-  }, [])
-
-  const handleClick = useCallback(() => {
-    onFocus(node.path)
-    if (isFolder) {
-      onToggleExpand(node.path)
-    } else {
-      onActivate(node.path)
-    }
-    // Ensure the tree container has DOM focus so keyboard navigation works
-    treeRef.current?.focus()
-  }, [isFolder, onToggleExpand, onActivate, onFocus, node.path, treeRef])
-
-  const FileIcon = !isFolder
-    ? (getFileIconByExtension(node.name) ?? UnknownFileIcon)
-    : null
-
-  return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger
-          asChild
-          onPointerDown={(e) => {
-            // Only allow right-click (context menu) through.
-            // For left-click, prevent ContextMenuTrigger from stealing focus.
-            if (e.button !== 2) e.preventDefault()
-          }}
-        >
-          <div
-            ref={rowRef}
-            role="treeitem"
-            aria-expanded={isFolder ? isExpanded : undefined}
-            onMouseDown={handleMouseDown}
-            onClick={handleClick}
-            className={cn(
-              "flex items-center h-[22px] w-full cursor-pointer select-none transition-colors",
-              isFocused
-                ? "bg-accent text-accent-foreground"
-                : isActive
-                  ? "bg-accent/50 text-accent-foreground"
-                  : "text-foreground hover:bg-accent/50",
-            )}
-            style={{ paddingLeft: level * INDENT_PX }}
-          >
-            <span className="w-4 h-full flex items-center justify-center shrink-0">
-              {isFolder ? (
-                <HiChevronRight
-                  className={cn(
-                    "size-2.5 text-muted-foreground transition-transform duration-150",
-                    isExpanded && "rotate-90",
-                  )}
-                />
-              ) : (
-                FileIcon && <FileIcon className="size-3.5 text-muted-foreground" />
-              )}
-            </span>
-            <span className="ml-1 text-xs truncate min-w-0">{node.name}</span>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-52">
-          {!isFolder && (
-            <>
-              <ContextMenuItem onClick={() => onContextAction("open-preview", node)}>
-                Open Preview
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-            </>
-          )}
-          <ContextMenuItem onClick={() => onContextAction("mention", node)}>
-            Add to Chat Context
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => onContextAction("open-editor", node)}>
-            Open in {editorLabel}
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onContextAction("reveal-finder", node)}>
-            Reveal in Finder
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => onContextAction("copy-path", node)}>
-            Copy Path
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onContextAction("copy-relative", node)}>
-            Copy Relative Path
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => onContextAction("rename", node)}>
-            Rename...
-          </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => onContextAction("delete", node)}
-            className="data-[highlighted]:bg-red-500/15 data-[highlighted]:text-red-400"
-          >
-            Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-
-      {isFolder &&
-        isExpanded &&
-        node.children!.map((child) => (
-          <TreeNode
-            key={child.id}
-            node={child}
-            level={level + 1}
-            focusedPath={focusedPath}
-            activePath={activePath}
-            isExpanded={child.type === "folder" && !!child.children && isPathExpanded(child.path)}
-            editorLabel={editorLabel}
-            isPathExpanded={isPathExpanded}
-            onToggleExpand={onToggleExpand}
-            onActivate={onActivate}
-            onFocus={onFocus}
-            onContextAction={onContextAction}
-            treeRef={treeRef}
-          />
-        ))}
-    </>
+function collectAllFolderIds(items: Record<string, FileTreeItem>): string[] {
+  return Object.keys(items).filter(
+    (k) => k !== "__root__" && items[k]!.type === "folder",
   )
-})
+}
+
+function collectRootFolderIds(items: Record<string, FileTreeItem>): string[] {
+  return (items["__root__"]?.children ?? []).filter(
+    (k) => items[k]?.type === "folder",
+  )
+}
 
 // ============================================================================
 // FilesTab
 // ============================================================================
 
-export const FilesTab = memo(forwardRef<FilesTabHandle, FilesTabProps>(function FilesTab({
-  worktreePath,
-  onSelectFile,
-  onExpandedStateChange,
-  currentViewerFilePath,
-  className,
-}, ref) {
-  // activePath = file currently open in viewer (secondary highlight), derived from prop
-  const activePath = useMemo(() => {
-    if (!currentViewerFilePath || !worktreePath) return null
-    const prefix = worktreePath + "/"
-    return currentViewerFilePath.startsWith(prefix)
-      ? currentViewerFilePath.slice(prefix.length)
-      : null
-  }, [currentViewerFilePath, worktreePath])
-
-  // focusedPath = keyboard/click cursor (primary highlight)
-  const [focusedPath, setFocusedPath] = useState<string | null>(null)
-  const treeRef = useRef<HTMLDivElement>(null)
-  const setFileSearchOpen = useSetAtom(fileSearchDialogOpenAtom)
-
-  // Persisted expanded paths (per worktree, survives reloads)
-  // Use a static noop atom when worktreePath is null to avoid polluting storage
-  const expandedAtom = useMemo(
-    () => worktreePath ? fileTreeExpandedAtomFamily(worktreePath) : noopExpandedAtom,
-    [worktreePath],
-  )
-  const [storedExpanded, setStoredExpanded] = useAtom(expandedAtom)
-
-  // Stable expanded paths Set — only recreate when storedExpanded array changes
-  const expandedPaths = useMemo(() => new Set(storedExpanded ?? []), [storedExpanded])
-
-  // Ref for reading current value in setExpandedPaths (Jotai doesn't support functional updaters)
-  const expandedPathsRef = useRef(expandedPaths)
-  expandedPathsRef.current = expandedPaths
-
-  const setExpandedPaths = useCallback((update: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-    const prev = expandedPathsRef.current
-    const next = typeof update === "function" ? update(prev) : update
-    setStoredExpanded([...next])
-  }, [setStoredExpanded])
-
-  // Stable callback for TreeNode to check if a path is expanded (avoids passing Set)
-  const isPathExpanded = useCallback((path: string): boolean => {
-    return expandedPathsRef.current.has(path)
-  }, [])
-
-  // Preferred editor for "Open in Editor" action
-  const preferredEditor = useAtomValue(preferredEditorAtom)
-  const editorLabel = useMemo(() => {
-    const opt = getAppOption(preferredEditor)
-    return opt.displayLabel ?? opt.label
-  }, [preferredEditor])
-
-  // Rename dialog state
-  const [renameTarget, setRenameTarget] = useState<FileTreeNode | null>(null)
-  const [renameLoading, setRenameLoading] = useState(false)
-
-  // tRPC mutations
-  const openInAppMutation = trpc.external.openInApp.useMutation()
-  const openInFinderMutation = trpc.external.openInFinder.useMutation()
-  const renameMutation = trpc.files.renameFile.useMutation()
-  const deleteMutation = trpc.files.deleteFile.useMutation()
-  const trpcUtils = trpc.useUtils()
-
-  // ---- Data ----
-  const { data: allFiles } = trpc.files.search.useQuery(
-    { projectPath: worktreePath || "", query: "", limit: 5000, typeFilter: "file" },
-    { enabled: !!worktreePath, staleTime: 10000 },
-  )
-
-  const tree = useMemo(() => {
-    if (!allFiles) return []
-    return buildFileTree(allFiles)
-  }, [allFiles])
-
-  // Auto-expand root folders on first visit (storedExpanded === null means never set)
-  useEffect(() => {
-    if (tree.length > 0 && worktreePath && storedExpanded === null) {
-      setStoredExpanded([...collectRootFolderPaths(tree)])
-    }
-  }, [tree, worktreePath, storedExpanded, setStoredExpanded])
-
-  const allFolderPaths = useMemo(() => collectAllFolderPaths(tree), [tree])
-
-  const visibleNodes = useMemo(
-    () => flattenVisible(tree, expandedPaths),
-    [tree, expandedPaths],
-  )
-
-  // ---- Actions ----
-
-  const toggleExpand = useCallback((path: string) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
-      return next
-    })
-  }, [setExpandedPaths])
-
-  /** Open a file — calls parent callback (activePath syncs via prop) */
-  const activateFile = useCallback(
-    (relativePath: string) => {
-      if (!worktreePath) return
-      onSelectFile(worktreePath + "/" + relativePath)
+export const FilesTab = memo(
+  forwardRef<FilesTabHandle, FilesTabProps>(function FilesTab(
+    {
+      worktreePath,
+      onSelectFile,
+      onExpandedStateChange,
+      currentViewerFilePath,
+      className,
     },
-    [worktreePath, onSelectFile],
-  )
+    ref,
+  ) {
+    // activePath = file currently open in viewer (secondary highlight)
+    const activePath = useMemo(() => {
+      if (!currentViewerFilePath || !worktreePath) return null
+      const prefix = worktreePath + "/"
+      return currentViewerFilePath.startsWith(prefix)
+        ? currentViewerFilePath.slice(prefix.length)
+        : null
+    }, [currentViewerFilePath, worktreePath])
 
-  const openSearch = useCallback(() => {
-    setFileSearchOpen(true)
-  }, [setFileSearchOpen])
+    const setFileSearchOpen = useSetAtom(fileSearchDialogOpenAtom)
 
-  // Proper subset check: all folder paths must be in expanded set
-  const isAllExpanded = useMemo(() => {
-    if (allFolderPaths.size === 0) return false
-    for (const p of allFolderPaths) {
-      if (!expandedPaths.has(p)) return false
-    }
-    return true
-  }, [allFolderPaths, expandedPaths])
-
-  const toggleExpandCollapse = useCallback(() => {
-    setExpandedPaths((prev) => {
-      // Check if anything is expanded — if so, collapse all
-      if (prev.size > 0) {
-        setFocusedPath(null)
-        return new Set()
-      }
-      return new Set(allFolderPaths)
-    })
-  }, [allFolderPaths, setExpandedPaths])
-
-  // Notify parent of expanded state changes
-  useEffect(() => {
-    onExpandedStateChange?.(isAllExpanded)
-  }, [isAllExpanded, onExpandedStateChange])
-
-  // Expose actions to parent
-  useImperativeHandle(ref, () => ({
-    toggleExpandCollapse,
-    openSearch,
-    isAllExpanded,
-  }), [toggleExpandCollapse, openSearch, isAllExpanded])
-
-  // ---- Context Menu Actions ----
-
-  const toAbsolute = useCallback((relativePath: string) => {
-    return worktreePath ? worktreePath + "/" + relativePath : relativePath
-  }, [worktreePath])
-
-  const invalidateFiles = useCallback(() => {
-    trpcUtils.files.search.invalidate()
-  }, [trpcUtils])
-
-  const handleContextAction = useCallback((action: string, node: FileTreeNode) => {
-    const absolutePath = toAbsolute(node.path)
-
-    switch (action) {
-      case "open-preview":
-        activateFile(node.path)
-        break
-
-      case "mention": {
-        const mentionType = node.type === "folder" ? "folder" : "file"
-        window.dispatchEvent(new CustomEvent("file-tree-mention", {
-          detail: {
-            id: `${mentionType}:local:${absolutePath}`,
-            label: node.name,
-            path: absolutePath,
-            repository: "local",
-            type: mentionType,
-          },
-        }))
-        break
-      }
-
-      case "open-editor":
-        openInAppMutation.mutate({ path: absolutePath, app: preferredEditor })
-        break
-
-      case "reveal-finder":
-        openInFinderMutation.mutate(absolutePath)
-        break
-
-      case "copy-path":
-        navigator.clipboard.writeText(absolutePath)
-        toast.success("Copied to clipboard", { description: absolutePath })
-        break
-
-      case "copy-relative":
-        navigator.clipboard.writeText(node.path)
-        toast.success("Copied to clipboard", { description: node.path })
-        break
-
-      case "rename":
-        setRenameTarget(node)
-        break
-
-      case "delete": {
-        const label = node.type === "folder" ? "folder" : "file"
-        if (window.confirm(`Move "${node.name}" to trash?`)) {
-          deleteMutation.mutate(
-            { absolutePath },
-            {
-              onSuccess: () => {
-                toast.success(`${node.name} moved to trash`)
-                invalidateFiles()
-              },
-              onError: (err) => {
-                toast.error(`Failed to delete ${label}`, { description: err.message })
-              },
-            },
-          )
-        }
-        break
-      }
-    }
-  }, [toAbsolute, activateFile, openInAppMutation, openInFinderMutation, preferredEditor, deleteMutation, invalidateFiles])
-
-  const handleRenameSave = useCallback(async (newName: string) => {
-    if (!renameTarget || !worktreePath) return
-    const absolutePath = toAbsolute(renameTarget.path)
-    setRenameLoading(true)
-    try {
-      await renameMutation.mutateAsync({ absolutePath, newName })
-      toast.success(`Renamed to ${newName}`)
-
-      // Update expanded paths: replace old path prefix with new
-      const oldPath = renameTarget.path
-      const parentDir = parentPath(oldPath)
-      const newRelativePath = parentDir ? parentDir + "/" + newName : newName
-
-      setExpandedPaths((prev) => {
-        const next = new Set<string>()
-        for (const p of prev) {
-          if (p === oldPath) {
-            next.add(newRelativePath)
-          } else if (p.startsWith(oldPath + "/")) {
-            next.add(newRelativePath + p.slice(oldPath.length))
-          } else {
-            next.add(p)
-          }
-        }
-        return next
-      })
-
-      // Update focused path if it was on the renamed item
-      setFocusedPath((prev) => {
-        if (!prev) return prev
-        if (prev === oldPath) return newRelativePath
-        if (prev.startsWith(oldPath + "/")) return newRelativePath + prev.slice(oldPath.length)
-        return prev
-      })
-
-      invalidateFiles()
-      setRenameTarget(null)
-    } catch (err: any) {
-      toast.error("Failed to rename", { description: err.message })
-      throw err // Keep dialog open
-    } finally {
-      setRenameLoading(false)
-    }
-  }, [renameTarget, worktreePath, toAbsolute, renameMutation, invalidateFiles, setExpandedPaths])
-
-  // ---- Keyboard (VS Code behaviour) ----
-
-  const refocusTree = useCallback(() => {
-    requestAnimationFrame(() => treeRef.current?.focus())
-  }, [])
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (visibleNodes.length === 0) return
-
-      const idx = focusedPath
-        ? visibleNodes.findIndex((n) => n.path === focusedPath)
-        : -1
-
-      const focusIndex = (i: number) => {
-        const clamped = Math.max(0, Math.min(i, visibleNodes.length - 1))
-        setFocusedPath(visibleNodes[clamped]!.path)
-      }
-
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault()
-          focusIndex(idx < 0 ? 0 : idx + 1)
-          break
-
-        case "ArrowUp":
-          e.preventDefault()
-          focusIndex(idx <= 0 ? 0 : idx - 1)
-          break
-
-        case "ArrowRight":
-          e.preventDefault()
-          if (idx < 0) break
-          {
-            const node = visibleNodes[idx]!
-            if (node.type === "folder" && node.children) {
-              if (!expandedPaths.has(node.path)) {
-                toggleExpand(node.path)
-                refocusTree()
-              } else if (node.children.length > 0) {
-                setFocusedPath(node.children[0]!.path)
-              }
-            }
-          }
-          break
-
-        case "ArrowLeft":
-          e.preventDefault()
-          if (idx < 0) break
-          {
-            const node = visibleNodes[idx]!
-            if (
-              node.type === "folder" &&
-              node.children &&
-              expandedPaths.has(node.path)
-            ) {
-              toggleExpand(node.path)
-              refocusTree()
-            } else {
-              const pp = parentPath(node.path)
-              if (pp) setFocusedPath(pp)
-            }
-          }
-          break
-
-        case "Enter":
-          e.preventDefault()
-          if (idx < 0) break
-          {
-            const node = visibleNodes[idx]!
-            if (node.type === "folder") {
-              toggleExpand(node.path)
-              refocusTree()
-            } else {
-              activateFile(node.path)
-              refocusTree()
-            }
-          }
-          break
-
-        case " ":
-          e.preventDefault()
-          if (idx < 0) break
-          {
-            const node = visibleNodes[idx]!
-            if (node.type === "file") {
-              activateFile(node.path)
-              refocusTree()
-            } else {
-              toggleExpand(node.path)
-              refocusTree()
-            }
-          }
-          break
-
-        case "Home":
-          e.preventDefault()
-          focusIndex(0)
-          break
-
-        case "End":
-          e.preventDefault()
-          focusIndex(visibleNodes.length - 1)
-          break
-
-        case "*":
-          e.preventDefault()
-          if (idx >= 0) {
-            const node = visibleNodes[idx]!
-            if (node.type === "folder" && node.children) {
-              setExpandedPaths((prev) => {
-                const next = new Set(prev)
-                ;(function addAll(n: FileTreeNode) {
-                  if (n.type === "folder" && n.children) {
-                    next.add(n.path)
-                    n.children.forEach(addAll)
-                  }
-                })(node)
-                return next
-              })
-              refocusTree()
-            }
-          }
-          break
-
-        default:
-          break
-      }
-    },
-    [visibleNodes, focusedPath, expandedPaths, toggleExpand, activateFile, refocusTree, setExpandedPaths],
-  )
-
-  // Stable close callback for RenameDialog
-  const handleRenameClose = useCallback(() => setRenameTarget(null), [])
-
-  // ---- Render ----
-
-  if (!worktreePath) {
-    return (
-      <div className={cn("flex-1 flex items-center justify-center p-4", className)}>
-        <p className="text-xs text-muted-foreground">No project open</p>
-      </div>
+    // Persisted expanded paths
+    const expandedAtom = useMemo(
+      () =>
+        worktreePath
+          ? fileTreeExpandedAtomFamily(worktreePath)
+          : noopExpandedAtom,
+      [worktreePath],
     )
-  }
+    const [storedExpanded, setStoredExpanded] = useAtom(expandedAtom)
 
-  return (
-    <div className={cn("flex flex-col h-full min-w-0 overflow-hidden", className)}>
-      <div className="flex-1 overflow-y-auto pb-2">
-        {tree.length === 0 ? (
+    // Rename dialog state
+    const [renameTarget, setRenameTarget] = useState<{
+      id: string
+      name: string
+      type: "file" | "folder"
+    } | null>(null)
+    const [renameLoading, setRenameLoading] = useState(false)
+
+    // Preferred editor
+    const preferredEditor = useAtomValue(preferredEditorAtom)
+    const editorLabel = useMemo(() => {
+      const opt = getAppOption(preferredEditor)
+      return opt.displayLabel ?? opt.label
+    }, [preferredEditor])
+
+    // tRPC
+    const openInAppMutation = trpc.external.openInApp.useMutation()
+    const openInFinderMutation = trpc.external.openInFinder.useMutation()
+    const renameMutation = trpc.files.renameFile.useMutation()
+    const deleteMutation = trpc.files.deleteFile.useMutation()
+    const trpcUtils = trpc.useUtils()
+
+    const { data: allFiles } = trpc.files.search.useQuery(
+      { projectPath: worktreePath || "", query: "", limit: 5000, typeFilter: "file" },
+      { enabled: !!worktreePath, staleTime: 10000 },
+    )
+
+    const itemMap = useMemo(() => {
+      if (!allFiles) return null
+      return buildItemMap(allFiles)
+    }, [allFiles])
+
+    // Auto-expand root folders on first visit
+    useEffect(() => {
+      if (itemMap && worktreePath && storedExpanded === null) {
+        setStoredExpanded(collectRootFolderIds(itemMap))
+      }
+    }, [itemMap, worktreePath, storedExpanded, setStoredExpanded])
+
+    const initialExpanded = useMemo(
+      () => storedExpanded ?? [],
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [], // intentionally only on mount
+    )
+
+    const tree = useTree<FileTreeItem>({
+      rootItemId: "__root__",
+      dataLoader: {
+        getItem: (id) => itemMap?.[id] ?? { name: id, path: id, type: "file" },
+        getChildren: (id) => itemMap?.[id]?.children ?? [],
+      },
+      features: [syncDataLoaderFeature, hotkeysCoreFeature, selectionFeature],
+      getItemName: (item) => item.getItemData().name,
+      isItemFolder: (item) =>
+        (item.getItemData()?.children?.length ?? 0) > 0,
+      indent: INDENT,
+      initialState: {
+        expandedItems: initialExpanded,
+      },
+    })
+
+    // Sync expanded state to persistent storage whenever the tree changes
+    const treeExpandedRef = useRef<string[]>([])
+    useEffect(() => {
+      if (!itemMap) return
+      const expanded = tree
+        .getItems()
+        .filter((item) => item.isFolder?.() && item.isExpanded?.())
+        .map((item) => item.getId())
+      // Only update if changed
+      const prev = treeExpandedRef.current
+      if (
+        prev.length !== expanded.length ||
+        expanded.some((id, i) => id !== prev[i])
+      ) {
+        treeExpandedRef.current = expanded
+        setStoredExpanded(expanded)
+      }
+    })
+
+    // isAllExpanded: all folder ids are expanded
+    const allFolderIds = useMemo(
+      () => (itemMap ? collectAllFolderIds(itemMap) : []),
+      [itemMap],
+    )
+
+    const expandedSet = useMemo(
+      () => new Set(storedExpanded ?? []),
+      [storedExpanded],
+    )
+
+    const isAllExpanded = useMemo(() => {
+      if (allFolderIds.length === 0) return false
+      return allFolderIds.every((id) => expandedSet.has(id))
+    }, [allFolderIds, expandedSet])
+
+    useEffect(() => {
+      onExpandedStateChange?.(isAllExpanded)
+    }, [isAllExpanded, onExpandedStateChange])
+
+    const openSearch = useCallback(() => {
+      setFileSearchOpen(true)
+    }, [setFileSearchOpen])
+
+    const toggleExpandCollapse = useCallback(() => {
+      if (expandedSet.size > 0) {
+        // Collapse all
+        tree.getItems().forEach((item) => {
+          if (item.isFolder?.() && item.isExpanded?.()) {
+            item.toggleExpanded?.()
+          }
+        })
+        setStoredExpanded([])
+      } else {
+        // Expand all
+        tree.getItems().forEach((item) => {
+          if (item.isFolder?.() && !item.isExpanded?.()) {
+            item.toggleExpanded?.()
+          }
+        })
+        setStoredExpanded(allFolderIds)
+      }
+    }, [expandedSet, tree, allFolderIds, setStoredExpanded])
+
+    useImperativeHandle(
+      ref,
+      () => ({ toggleExpandCollapse, openSearch, isAllExpanded }),
+      [toggleExpandCollapse, openSearch, isAllExpanded],
+    )
+
+    // ---- Context actions ----
+
+    const toAbsolute = useCallback(
+      (relativePath: string) =>
+        worktreePath ? worktreePath + "/" + relativePath : relativePath,
+      [worktreePath],
+    )
+
+    const invalidateFiles = useCallback(() => {
+      trpcUtils.files.search.invalidate()
+    }, [trpcUtils])
+
+    const handleContextAction = useCallback(
+      (
+        action: string,
+        nodeId: string,
+        nodeType: "file" | "folder",
+        nodeName: string,
+      ) => {
+        const absolutePath = toAbsolute(nodeId)
+
+        switch (action) {
+          case "open-preview":
+            if (!worktreePath) break
+            onSelectFile(worktreePath + "/" + nodeId)
+            break
+
+          case "mention": {
+            const mentionType = nodeType === "folder" ? "folder" : "file"
+            window.dispatchEvent(
+              new CustomEvent("file-tree-mention", {
+                detail: {
+                  id: `${mentionType}:local:${absolutePath}`,
+                  label: nodeName,
+                  path: absolutePath,
+                  repository: "local",
+                  type: mentionType,
+                },
+              }),
+            )
+            break
+          }
+
+          case "open-editor":
+            openInAppMutation.mutate({ path: absolutePath, app: preferredEditor })
+            break
+
+          case "reveal-finder":
+            openInFinderMutation.mutate(absolutePath)
+            break
+
+          case "copy-path":
+            navigator.clipboard.writeText(absolutePath)
+            toast.success("Copied to clipboard", { description: absolutePath })
+            break
+
+          case "copy-relative":
+            navigator.clipboard.writeText(nodeId)
+            toast.success("Copied to clipboard", { description: nodeId })
+            break
+
+          case "rename":
+            setRenameTarget({ id: nodeId, name: nodeName, type: nodeType })
+            break
+
+          case "delete": {
+            const label = nodeType === "folder" ? "folder" : "file"
+            if (window.confirm(`Move "${nodeName}" to trash?`)) {
+              deleteMutation.mutate(
+                { absolutePath },
+                {
+                  onSuccess: () => {
+                    toast.success(`${nodeName} moved to trash`)
+                    invalidateFiles()
+                  },
+                  onError: (err) => {
+                    toast.error(`Failed to delete ${label}`, {
+                      description: err.message,
+                    })
+                  },
+                },
+              )
+            }
+            break
+          }
+        }
+      },
+      [
+        toAbsolute,
+        worktreePath,
+        onSelectFile,
+        openInAppMutation,
+        openInFinderMutation,
+        preferredEditor,
+        deleteMutation,
+        invalidateFiles,
+      ],
+    )
+
+    const handleRenameSave = useCallback(
+      async (newName: string) => {
+        if (!renameTarget || !worktreePath) return
+        const absolutePath = toAbsolute(renameTarget.id)
+        setRenameLoading(true)
+        try {
+          await renameMutation.mutateAsync({ absolutePath, newName })
+          toast.success(`Renamed to ${newName}`)
+          invalidateFiles()
+          setRenameTarget(null)
+        } catch (err: any) {
+          toast.error("Failed to rename", { description: err.message })
+          throw err
+        } finally {
+          setRenameLoading(false)
+        }
+      },
+      [renameTarget, worktreePath, toAbsolute, renameMutation, invalidateFiles],
+    )
+
+    const handleRenameClose = useCallback(() => setRenameTarget(null), [])
+
+    // ---- Render ----
+
+    if (!worktreePath) {
+      return (
+        <div
+          className={cn(
+            "flex-1 flex items-center justify-center p-4",
+            className,
+          )}
+        >
+          <p className="text-xs text-muted-foreground">No project open</p>
+        </div>
+      )
+    }
+
+    if (!itemMap) {
+      return (
+        <div className={cn("flex flex-col h-full min-w-0 overflow-hidden", className)}>
           <div className="px-2 py-4 text-center">
             <p className="text-xs text-muted-foreground">Loading files...</p>
           </div>
-        ) : (
-          <div
-            ref={treeRef}
-            role="tree"
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
-            className="outline-none"
-          >
-            {tree.map((node) => (
-              <TreeNode
-                key={node.id}
-                node={node}
-                level={0}
-                focusedPath={focusedPath}
-                activePath={activePath}
-                isExpanded={node.type === "folder" && !!node.children && expandedPaths.has(node.path)}
-                editorLabel={editorLabel}
-                isPathExpanded={isPathExpanded}
-                onToggleExpand={toggleExpand}
-                onActivate={activateFile}
-                onFocus={setFocusedPath}
-                onContextAction={handleContextAction}
-                treeRef={treeRef}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+        </div>
+      )
+    }
 
-      {/* Rename Dialog */}
-      <RenameDialog
-        isOpen={!!renameTarget}
-        onClose={handleRenameClose}
-        onSave={handleRenameSave}
-        currentName={renameTarget?.name ?? ""}
-        isLoading={renameLoading}
-        title="Rename"
-        placeholder="New name"
-      />
-    </div>
-  )
-}))
+    return (
+      <div
+        className={cn(
+          "flex flex-col h-full min-w-0 overflow-hidden",
+          className,
+        )}
+      >
+        <div className="flex-1 overflow-y-auto pb-2">
+          <Tree
+            className={cn(
+              // Vertical guide lines: one line per indent level
+              "before:-ms-0 relative before:absolute before:inset-0",
+              "before:bg-[repeating-linear-gradient(to_right,transparent_0,transparent_calc(var(--tree-indent)-1px),color-mix(in_oklch,var(--border)_60%,transparent)_calc(var(--tree-indent)-1px),color-mix(in_oklch,var(--border)_60%,transparent)_calc(var(--tree-indent)))]",
+            )}
+            indent={INDENT}
+            tree={tree}
+          >
+            {tree.getItems().map((item) => {
+              const data = item.getItemData()
+              const isFolder = item.isFolder()
+              const isExpanded = item.isExpanded()
+              const nodeId = item.getId()
+              const isFocused =
+                typeof item.isFocused === "function" ? item.isFocused() : false
+              const isActive = !isFocused && activePath === nodeId
+
+              const FileIcon2 = !isFolder
+                ? (getFileIconByExtension(data.name) ?? UnknownFileIcon)
+                : null
+
+              return (
+                <ContextMenu key={item.getId()}>
+                  <ContextMenuTrigger asChild>
+                    <TreeItem
+                      item={item}
+                      onClick={() => {
+                        if (!isFolder) {
+                          onSelectFile(worktreePath + "/" + nodeId)
+                        }
+                      }}
+                      className="w-full text-left"
+                    >
+                      <TreeItemLabel
+                        className={cn(
+                          "h-[22px] py-0 rounded-sm text-xs gap-1.5",
+                          isFocused
+                            ? "bg-accent text-accent-foreground"
+                            : isActive
+                              ? "bg-accent/50 text-accent-foreground"
+                              : "hover:bg-accent/50",
+                          // override the not-in-data-[folder] left-padding
+                          "not-in-data-[folder=true]:ps-2",
+                        )}
+                      >
+                        {isFolder ? (
+                          isExpanded ? (
+                            <FolderOpenIcon className="size-3.5 text-muted-foreground shrink-0" />
+                          ) : (
+                            <FolderIcon className="size-3.5 text-muted-foreground shrink-0" />
+                          )
+                        ) : (
+                          FileIcon2 && (
+                            <FileIcon2 className="size-3.5 text-muted-foreground shrink-0" />
+                          )
+                        )}
+                        <span className="truncate min-w-0">{data.name}</span>
+                      </TreeItemLabel>
+                    </TreeItem>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-52">
+                    {!isFolder && (
+                      <>
+                        <ContextMenuItem
+                          onClick={() =>
+                            handleContextAction(
+                              "open-preview",
+                              nodeId,
+                              data.type,
+                              data.name,
+                            )
+                          }
+                        >
+                          Open Preview
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                      </>
+                    )}
+                    <ContextMenuItem
+                      onClick={() =>
+                        handleContextAction(
+                          "mention",
+                          nodeId,
+                          data.type,
+                          data.name,
+                        )
+                      }
+                    >
+                      Add to Chat Context
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      onClick={() =>
+                        handleContextAction(
+                          "open-editor",
+                          nodeId,
+                          data.type,
+                          data.name,
+                        )
+                      }
+                    >
+                      Open in {editorLabel}
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() =>
+                        handleContextAction(
+                          "reveal-finder",
+                          nodeId,
+                          data.type,
+                          data.name,
+                        )
+                      }
+                    >
+                      Reveal in Finder
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      onClick={() =>
+                        handleContextAction(
+                          "copy-path",
+                          nodeId,
+                          data.type,
+                          data.name,
+                        )
+                      }
+                    >
+                      Copy Path
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() =>
+                        handleContextAction(
+                          "copy-relative",
+                          nodeId,
+                          data.type,
+                          data.name,
+                        )
+                      }
+                    >
+                      Copy Relative Path
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      onClick={() =>
+                        handleContextAction(
+                          "rename",
+                          nodeId,
+                          data.type,
+                          data.name,
+                        )
+                      }
+                    >
+                      Rename...
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() =>
+                        handleContextAction(
+                          "delete",
+                          nodeId,
+                          data.type,
+                          data.name,
+                        )
+                      }
+                      className="data-[highlighted]:bg-red-500/15 data-[highlighted]:text-red-400"
+                    >
+                      Delete
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              )
+            })}
+          </Tree>
+        </div>
+
+        <RenameDialog
+          isOpen={!!renameTarget}
+          onClose={handleRenameClose}
+          onSave={handleRenameSave}
+          currentName={renameTarget?.name ?? ""}
+          isLoading={renameLoading}
+          title="Rename"
+          placeholder="New name"
+        />
+      </div>
+    )
+  }),
+)
