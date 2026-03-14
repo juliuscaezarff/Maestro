@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="src/renderer/assets/app-icons/logo-black.png" alt="Maestro" width="200" />
+  <img src="src/renderer/assets/app-icons/maestro-logo-black.svg" alt="Maestro" width="200" />
 </div>
 
 # Maestro
