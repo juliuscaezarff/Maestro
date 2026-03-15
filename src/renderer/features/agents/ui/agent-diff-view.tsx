@@ -266,6 +266,26 @@ const PIERRE_DIFFS_THEME_CSS = `
     left: 1ch;
   }
 
+  /* Remove Shiki theme background from diff container and all lines */
+  [data-diffs],
+  [data-line] {
+    background-color: transparent !important;
+  }
+
+  /* Remove Shiki theme background from line number gutter on unchanged lines */
+  [data-line-type='context'] [data-column-number],
+  [data-line-type='context-expanded'] [data-column-number] {
+    background-color: transparent !important;
+  }
+
+  /* Restore hover on line number gutter for unchanged lines (higher specificity beats transparent above) */
+  @media (pointer: fine) {
+    [data-line-type='context']:hover:not([data-selected-line]) [data-column-number],
+    [data-line-type='context-expanded']:hover:not([data-selected-line]) [data-column-number] {
+      background-color: var(--diffs-bg-hover) !important;
+    }
+  }
+
   /* Show scrollbar only on hover */
   [data-code] {
     padding-bottom: 0 !important;
@@ -289,16 +309,17 @@ const PIERRE_DIFFS_THEME_CSS = `
   [data-diffs][data-theme-type='light'] {
     --diffs-gap-style: none !important;
     --diffs-light-bg: hsl(var(--background)) !important;
-    --diffs-bg-context-override: hsl(var(--background)) !important;
-    --diffs-bg-separator-override: hsl(var(--background)) !important;
-    --diffs-light-addition-color: hsl(160, 77%, 35%) !important;
-    --diffs-bg-addition-override: hsl(160, 77%, 88%) !important;
-    --diffs-bg-addition-number-override: hsl(160, 77%, 85%) !important;
-    --diffs-bg-addition-hover-override: hsl(160, 77%, 82%) !important;
-    --diffs-light-deletion-color: hsl(10, 100%, 40%) !important;
-    --diffs-bg-deletion-override: hsl(10, 100%, 90%) !important;
-    --diffs-bg-deletion-number-override: hsl(10, 100%, 87%) !important;
-    --diffs-bg-deletion-hover-override: hsl(10, 100%, 84%) !important;
+    --diffs-bg-buffer-override: transparent !important;
+    --diffs-bg-context-override: transparent !important;
+    --diffs-bg-separator-override: transparent !important;
+    --diffs-light-addition-color: hsl(152, 38%, 36%) !important;
+    --diffs-bg-addition-override: hsl(152, 30%, 93%) !important;
+    --diffs-bg-addition-number-override: hsl(152, 30%, 90%) !important;
+    --diffs-bg-addition-hover-override: hsl(152, 30%, 87%) !important;
+    --diffs-light-deletion-color: hsl(4, 48%, 43%) !important;
+    --diffs-bg-deletion-override: hsl(4, 38%, 94%) !important;
+    --diffs-bg-deletion-number-override: hsl(4, 38%, 91%) !important;
+    --diffs-bg-deletion-hover-override: hsl(4, 38%, 88%) !important;
     --diffs-fg-number-override: hsl(var(--muted-foreground)) !important;
   }
 
@@ -306,17 +327,18 @@ const PIERRE_DIFFS_THEME_CSS = `
   [data-diffs][data-theme-type='dark'] {
     --diffs-gap-style: none !important;
     --diffs-dark-bg: hsl(var(--background)) !important;
-    --diffs-bg-context-override: hsl(var(--background)) !important;
-    --diffs-bg-separator-override: hsl(var(--background)) !important;
-    --diffs-bg-hover-override: hsl(0, 0%, 22%) !important;
-    --diffs-dark-addition-color: hsl(130, 50%, 50%) !important;
-    --diffs-bg-addition-override: hsl(130, 30%, 20%) !important;
-    --diffs-bg-addition-number-override: hsl(130, 30%, 18%) !important;
-    --diffs-bg-addition-hover-override: hsl(130, 30%, 25%) !important;
-    --diffs-dark-deletion-color: hsl(12, 50%, 55%) !important;
-    --diffs-bg-deletion-override: hsl(12, 30%, 18%) !important;
-    --diffs-bg-deletion-number-override: hsl(12, 30%, 16%) !important;
-    --diffs-bg-deletion-hover-override: hsl(12, 30%, 23%) !important;
+    --diffs-bg-buffer-override: transparent !important;
+    --diffs-bg-context-override: transparent !important;
+    --diffs-bg-separator-override: transparent !important;
+    --diffs-bg-hover-override: hsl(var(--accent)) !important;
+    --diffs-dark-addition-color: hsl(152, 32%, 46%) !important;
+    --diffs-bg-addition-override: hsl(152, 16%, 17%) !important;
+    --diffs-bg-addition-number-override: hsl(152, 16%, 15%) !important;
+    --diffs-bg-addition-hover-override: hsl(152, 16%, 21%) !important;
+    --diffs-dark-deletion-color: hsl(4, 32%, 50%) !important;
+    --diffs-bg-deletion-override: hsl(4, 16%, 17%) !important;
+    --diffs-bg-deletion-number-override: hsl(4, 16%, 15%) !important;
+    --diffs-bg-deletion-hover-override: hsl(4, 16%, 21%) !important;
     --diffs-fg-number-override: hsl(var(--muted-foreground)) !important;
   }
 `
@@ -955,7 +977,7 @@ const FileDiffCard = memo(function FileDiffCard({
                   fileDiff={fileDiffMeta}
                   options={{
                     diffStyle: diffMode,
-                    diffIndicators: "classic",
+                    diffIndicators: "bars",
                     themeType: isLight ? "light" : "dark",
                     overflow: "scroll",
                     disableFileHeader: true,
@@ -969,7 +991,7 @@ const FileDiffCard = memo(function FileDiffCard({
                   patch={file.diffText}
                   options={{
                     diffStyle: diffMode,
-                    diffIndicators: "classic",
+                    diffIndicators: "bars",
                     themeType: isLight ? "light" : "dark",
                     overflow: "scroll",
                     disableFileHeader: true,
