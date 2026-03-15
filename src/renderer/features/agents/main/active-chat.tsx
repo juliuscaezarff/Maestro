@@ -41,7 +41,8 @@ import {
   ChevronDown,
   GitFork,
   ListTree,
-  TerminalSquare
+  TerminalSquare,
+  X,
 } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import {
@@ -81,7 +82,7 @@ import { trpc, trpcClient } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
 import { isDesktopApp } from "../../../lib/utils/platform"
 import { ChangesPanel } from "../../changes"
-import { useCommitActions } from "../../changes/components/commit-input"
+import { useCommitActions, CommitInput } from "../../changes/components/commit-input"
 import { DiffCenterPeekDialog } from "../../changes/components/diff-center-peek-dialog"
 import { DiffFullPageView } from "../../changes/components/diff-full-page-view"
 import { DiffSidebarHeader } from "../../changes/components/diff-sidebar-header"
@@ -111,6 +112,8 @@ import {
   compactingSubChatsAtom,
   currentPlanPathAtomFamily,
   diffActiveTabAtom,
+  diffCommitOpenAtom,
+  diffSelectedFilesForCommitAtomFamily,
   diffSidebarOpenAtomFamily,
   diffViewDisplayModeAtom,
   expiredUserQuestionsAtom,
@@ -1125,22 +1128,36 @@ const DiffSidebarContent = memo(function DiffSidebarContent({
     resetActiveTabRef,
   } = useDiffState()
 
-  // Compute initial selected file synchronously for first render
-  // This prevents AgentDiffView from rendering all files before filter kicks in
-  const initialSelectedFile = useMemo(() => {
-    if (selectedFilePath) return selectedFilePath
-    if (parsedFileDiffs && parsedFileDiffs.length > 0) {
-      const firstFile = parsedFileDiffs[0]
-      const filePath = firstFile.newPath !== '/dev/null' ? firstFile.newPath : firstFile.oldPath
-      if (filePath && filePath !== '/dev/null') {
-        return filePath
+  // Commit drawer state
+  const [commitOpen, setCommitOpen] = useAtom(diffCommitOpenAtom)
+  const selectedFilePaths = useAtomValue(diffSelectedFilesForCommitAtomFamily(chatId || ""))
+  const [commitDrawerWidth, setCommitDrawerWidth] = useAtom(agentsChangesPanelWidthAtom)
+  const [isCommitDrawerResizing, setIsCommitDrawerResizing] = useState(false)
+
+  const handleCommitDrawerResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      const startX = event.clientX
+      const startWidth = commitDrawerWidth
+      const pointerId = event.pointerId
+      const handleElement = event.currentTarget as HTMLElement
+      const clamp = (w: number) => Math.max(200, Math.min(480, w))
+      handleElement.setPointerCapture?.(pointerId)
+      setIsCommitDrawerResizing(true)
+      const onMove = (e: PointerEvent) => setCommitDrawerWidth(clamp(startWidth + (e.clientX - startX)))
+      const onUp = () => {
+        if (handleElement.hasPointerCapture?.(pointerId)) handleElement.releasePointerCapture(pointerId)
+        document.removeEventListener("pointermove", onMove)
+        document.removeEventListener("pointerup", onUp)
+        setIsCommitDrawerResizing(false)
       }
-    }
-    return null
-  }, [selectedFilePath, parsedFileDiffs])
-  const [changesPanelWidth, setChangesPanelWidth] = useAtom(agentsChangesPanelWidthAtom)
-  const [isChangesPanelCollapsed, setIsChangesPanelCollapsed] = useAtom(agentsChangesPanelCollapsedAtom)
-  const [isResizing, setIsResizing] = useState(false)
+      document.addEventListener("pointermove", onMove)
+      document.addEventListener("pointerup", onUp, { once: true })
+    },
+    [commitDrawerWidth, setCommitDrawerWidth]
+  )
 
   // Active tab state (Changes/History) - atom so external components can switch tabs
   const [activeTab, setActiveTab] = useAtom(diffActiveTabAtom)
@@ -1156,58 +1173,6 @@ const DiffSidebarContent = memo(function DiffSidebarContent({
 
   // Selected commit for History tab
   const [selectedCommit, setSelectedCommit] = useAtom(selectedCommitAtom)
-
-  // When sidebar is narrow (< 500px), use vertical layout
-  const isNarrow = sidebarWidth < 500
-
-  // Get diff stats for collapsed header display
-  const { data: diffStatus } = trpc.changes.getStatus.useQuery(
-    { worktreePath: worktreePath || "" },
-    { enabled: !!worktreePath && isNarrow }
-  )
-
-  // Handle resize drag
-  const handleResizePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return
-
-      event.preventDefault()
-      event.stopPropagation()
-
-      const startX = event.clientX
-      const startWidth = changesPanelWidth
-      const pointerId = event.pointerId
-      const handleElement = event.currentTarget as HTMLElement
-
-      const minWidth = 200
-      const maxWidth = 450
-
-      const clampWidth = (width: number) =>
-        Math.max(minWidth, Math.min(maxWidth, width))
-
-      handleElement.setPointerCapture?.(pointerId)
-      setIsResizing(true)
-
-      const handlePointerMove = (e: PointerEvent) => {
-        const delta = e.clientX - startX
-        const newWidth = clampWidth(startWidth + delta)
-        setChangesPanelWidth(newWidth)
-      }
-
-      const handlePointerUp = () => {
-        if (handleElement.hasPointerCapture?.(pointerId)) {
-          handleElement.releasePointerCapture(pointerId)
-        }
-        document.removeEventListener("pointermove", handlePointerMove)
-        document.removeEventListener("pointerup", handlePointerUp)
-        setIsResizing(false)
-      }
-
-      document.addEventListener("pointermove", handlePointerMove)
-      document.addEventListener("pointerup", handlePointerUp, { once: true })
-    },
-    [changesPanelWidth, setChangesPanelWidth]
-  )
 
   // Handle commit selection in History tab
   const handleCommitSelect = useCallback((commit: SelectedCommit) => {
@@ -1254,25 +1219,26 @@ const DiffSidebarContent = memo(function DiffSidebarContent({
   const effectiveParsedFiles = shouldUseCommitDiff ? null : parsedFileDiffs
   const effectivePrefetchedContents = shouldUseCommitDiff ? {} : prefetchedFileContents
 
-  if (isNarrow) {
-    // Count changed files for collapsed header
-    const changedFilesCount = diffStatus
-      ? (diffStatus.staged?.length || 0) + (diffStatus.unstaged?.length || 0) + (diffStatus.untracked?.length || 0)
-      : 0
-    const stagedCount = diffStatus?.staged?.length || 0
-
-    // Vertical layout: ChangesPanel on top, diff/file list below
-    return (
-      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* Top: ChangesPanel (file list + commit) */}
-        {worktreePath && (
-          <div className={cn(
-            "flex-shrink-0 overflow-hidden flex flex-col",
-            "h-[45%] min-h-[200px] border-b border-border/50"
-          )}>
+  // Layout: commit drawer (when open) on left, diff view fills remaining space
+  return (
+    <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* Commit drawer - flex child, slides in alongside diff view */}
+      {worktreePath && commitOpen && (
+        <div className="h-full flex-shrink-0 relative flex flex-col border-r border-border/50" style={{ width: commitDrawerWidth }}>
+          {/* Drawer header */}
+          <div className="flex items-center justify-between px-3 h-9 border-b border-border/50 flex-shrink-0">
+            <span className="text-xs font-medium text-foreground">Commit changes</span>
+            <button
+              onClick={() => setCommitOpen(false)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+          {/* File list */}
+          <div className="flex-1 min-h-0 overflow-hidden">
             <ChangesPanel
               worktreePath={worktreePath}
-              activeTab={activeTab}
               selectedFilePath={selectedFilePath}
               onFileSelect={handleDiffFileSelect}
               onFileOpenPinned={() => {}}
@@ -1282,149 +1248,39 @@ const DiffSidebarContent = memo(function DiffSidebarContent({
               subChats={subChats}
               initialSubChatFilter={filteredSubChatId}
               chatId={chatId}
-              selectedCommitHash={selectedCommit?.hash}
-              onCommitSelect={handleCommitSelect}
-              onCommitFileSelect={handleCommitFileSelect}
               onActiveTabChange={setActiveTab}
-              pushCount={diffStatus?.pushCount}
             />
           </div>
-        )}
-        {/* Bottom: File list (when History tab + commit selected) or AgentDiffView (diff) */}
-        {/* Both views are always mounted but hidden via CSS to prevent expensive re-mounts */}
-        <div className="flex-1 overflow-hidden flex flex-col relative">
-          {/* History view - files in commit */}
-          <div className={cn(
-            "absolute inset-0 overflow-y-auto",
-            activeTab === "history" && selectedCommit ? "z-10" : "z-0 invisible"
-          )}>
-            {selectedCommit && (
-              !commitFiles ? (
-                <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-                  Loading files...
-                </div>
-              ) : commitFiles.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-                  No files changed in this commit
-                </div>
-              ) : (
-                <>
-                  {/* Commit message and description */}
-                  <div className="px-3 py-2 border-b border-border/50">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <div className="text-sm font-medium text-foreground flex-1">
-                        {selectedCommit.message}
-                      </div>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(selectedCommit.hash)
-                          toast.success('Copied SHA to clipboard')
-                        }}
-                        className="text-xs font-mono text-muted-foreground hover:text-foreground underline cursor-pointer shrink-0"
-                      >
-                        {selectedCommit.shortHash}
-                      </button>
-                    </div>
-                    {selectedCommit.description && (
-                      <div className="text-xs text-foreground/80 mb-2 whitespace-pre-wrap">
-                        {selectedCommit.description}
-                      </div>
-                    )}
-                    <div className="text-xs text-muted-foreground">
-                      {selectedCommit.author} • {selectedCommit.date ? new Date(selectedCommit.date).toLocaleString() : 'Unknown date'}
-                    </div>
-                  </div>
-
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium bg-muted/30 border-b border-border/50">
-                    Files in commit ({commitFiles.length})
-                  </div>
-                  {commitFiles.map((file) => (
-                    <CommitFileItem
-                      key={file.path}
-                      file={file}
-                      onClick={() => {}}
-                    />
-                  ))}
-                </>
-              )
-            )}
-          </div>
-          {/* Diff view - always mounted to prevent expensive re-initialization */}
-          <div className={cn(
-            "absolute inset-0 overflow-hidden",
-            activeTab === "history" && selectedCommit ? "z-0 invisible" : "z-10"
-          )}>
-            <AgentDiffView
-              ref={diffViewRef}
+          {/* Commit input */}
+          <div className="flex-shrink-0 border-t border-border/50">
+            <CommitInput
+              worktreePath={worktreePath}
+              hasStagedChanges={selectedFilePaths.length > 0}
+              onRefresh={handleCommitSuccess}
+              onCommitSuccess={() => {
+                setCommitOpen(false)
+                handleCommitSuccess()
+              }}
+              stagedCount={selectedFilePaths.length}
+              currentBranch={undefined}
+              selectedFilePaths={selectedFilePaths}
               chatId={chatId}
-              sandboxId={sandboxId}
-              worktreePath={worktreePath || undefined}
-              repository={repository}
-              onStatsChange={setDiffStats}
-              initialDiff={effectiveDiff}
-              initialParsedFiles={effectiveParsedFiles}
-              prefetchedFileContents={effectivePrefetchedContents}
-              showFooter={false}
-              onCollapsedStateChange={setDiffCollapseState}
-              onSelectNextFile={handleSelectNextFile}
-              onViewedCountChange={handleViewedCountChange}
-              initialSelectedFile={initialSelectedFile}
             />
           </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Horizontal layout: files on left, diff on right
-  return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Left: ChangesPanel (file list + commit) with resize handle */}
-      {worktreePath && (
-        <div
-          className="h-full flex-shrink-0 relative"
-          style={{ width: changesPanelWidth }}
-        >
-          <ChangesPanel
-            worktreePath={worktreePath}
-            activeTab={activeTab}
-            selectedFilePath={selectedFilePath}
-            onFileSelect={handleDiffFileSelect}
-            onFileOpenPinned={() => {}}
-            onCreatePr={onCreatePr}
-            onCommitSuccess={handleCommitSuccess}
-            onDiscardSuccess={onDiscardSuccess}
-            subChats={subChats}
-            initialSubChatFilter={filteredSubChatId}
-            chatId={chatId}
-            selectedCommitHash={selectedCommit?.hash}
-            onCommitSelect={handleCommitSelect}
-            onCommitFileSelect={handleCommitFileSelect}
-            onActiveTabChange={setActiveTab}
-            pushCount={diffStatus?.pushCount}
-          />
-          {/* Resize handle - styled like ResizableSidebar */}
+          {/* Resize handle */}
           <div
-            onPointerDown={handleResizePointerDown}
-            className="absolute top-0 bottom-0 cursor-col-resize z-10"
-            style={{
-              right: 0,
-              width: "4px",
-              marginRight: "-2px",
-            }}
+            onPointerDown={handleCommitDrawerResizePointerDown}
+            className="absolute top-0 bottom-0 right-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors"
+            style={{ marginRight: "-2px" }}
           />
         </div>
       )}
-      {/* Right: File list (when History tab) or AgentDiffView (when Changes tab) */}
-      {/* Both views are always mounted but hidden via CSS to prevent expensive re-mounts */}
-      <div className={cn(
-        "flex-1 h-full min-w-0 overflow-hidden relative",
-        "border-l border-border/50"
-      )}>
+      {/* Diff view - takes remaining space */}
+      <div className="flex-1 h-full min-w-0 overflow-hidden relative">
         {/* History view - files in commit */}
         <div className={cn(
           "absolute inset-0 overflow-y-auto",
-          activeTab === "history" && selectedCommit ? "z-10" : "z-0 invisible"
+          activeTab === "history" && selectedCommit ? "z-[2]" : "z-0 invisible"
         )}>
           {selectedCommit && (
             !commitFiles ? (
@@ -1480,7 +1336,7 @@ const DiffSidebarContent = memo(function DiffSidebarContent({
         {/* Diff view - always mounted to prevent expensive re-initialization */}
         <div className={cn(
           "absolute inset-0 overflow-hidden",
-          activeTab === "history" && selectedCommit ? "z-0 invisible" : "z-10"
+          activeTab === "history" && selectedCommit ? "z-0 invisible" : "z-[2]"
         )}>
           <AgentDiffView
             ref={diffViewRef}
@@ -1496,7 +1352,7 @@ const DiffSidebarContent = memo(function DiffSidebarContent({
             onCollapsedStateChange={setDiffCollapseState}
             onSelectNextFile={handleSelectNextFile}
             onViewedCountChange={handleViewedCountChange}
-            initialSelectedFile={initialSelectedFile}
+            initialSelectedFile={undefined}
           />
         </div>
       </div>
@@ -1547,36 +1403,13 @@ const DiffStateProvider = memo(function DiffStateProvider({
   const [filteredSubChatId, setFilteredSubChatId] = useAtom(filteredSubChatIdAtom)
   const isChangesPanelCollapsed = useAtomValue(agentsChangesPanelCollapsedAtom)
 
-  // Auto-select first file when diff sidebar opens - use useLayoutEffect for synchronous update
-  // This prevents the initial render from showing all 11 files before filter kicks in
+  // Reset state when diff sidebar closes
   useLayoutEffect(() => {
     if (!isDiffSidebarOpen) {
       setSelectedFilePath(null)
       setFilteredDiffFiles(null)
-      return
     }
-
-    // Determine which file to select
-    let fileToSelect = selectedFilePath
-    if (!fileToSelect && parsedFileDiffs && parsedFileDiffs.length > 0) {
-      const firstFile = parsedFileDiffs[0]
-      fileToSelect = firstFile.newPath !== '/dev/null' ? firstFile.newPath : firstFile.oldPath
-      if (fileToSelect && fileToSelect !== '/dev/null') {
-        setSelectedFilePath(fileToSelect)
-      }
-    }
-
-    // Filter logic based on layout mode
-    const shouldShowAllFiles = isDiffSidebarNarrow && isChangesPanelCollapsed
-
-    if (shouldShowAllFiles) {
-      setFilteredDiffFiles(null)
-    } else if (fileToSelect) {
-      setFilteredDiffFiles([fileToSelect])
-    } else {
-      setFilteredDiffFiles(null)
-    }
-  }, [isDiffSidebarOpen, selectedFilePath, parsedFileDiffs, isDiffSidebarNarrow, isChangesPanelCollapsed, setFilteredDiffFiles, setSelectedFilePath])
+  }, [isDiffSidebarOpen, setFilteredDiffFiles, setSelectedFilePath])
 
   // Stable callbacks
   const handleDiffFileSelect = useCallback((file: { path: string }, _category: string) => {
@@ -1806,6 +1639,8 @@ const DiffSidebarRenderer = memo(function DiffSidebarRenderer({
           isFullscreen={isFullscreen}
           displayMode={diffDisplayMode}
           onDisplayModeChange={setDiffDisplayMode}
+          chatId={chatId}
+          onCommitSuccess={handleRefreshGitStatus}
         />
       ) : sandboxId ? (
         <div className="flex items-center h-10 px-2 border-b border-border/50 bg-background flex-shrink-0">
