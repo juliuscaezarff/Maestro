@@ -82,6 +82,7 @@ import { remoteApi } from "../../../lib/remote-api"
 export type DiffViewMode = "unified" | "split"
 
 const LARGE_DIFF_LINE_THRESHOLD = 2000
+const LAZY_DIFF_LINE_THRESHOLD = 500
 
 // Simple fast string hash (djb2 algorithm) for content change detection
 function hashString(str: string): string {
@@ -511,8 +512,11 @@ interface FileDiffCardProps {
   onToggleViewed: (fileKey: string, diffText: string) => void
   /** Whether to show the viewed checkbox (hide for sandboxes) */
   showViewed?: boolean
-  /** Chat ID for file preview sidebar */
-  chatId?: string
+  // Lifted from parent to avoid per-card atom subscriptions
+  editorLabel: string
+  onOpenInFinder: (path: string) => void
+  onOpenInEditor: (path: string) => void
+  onOpenInFilePreview: (path: string) => void
 }
 
 // Custom comparator to prevent unnecessary re-renders
@@ -539,7 +543,7 @@ const fileDiffCardAreEqual = (
   // Viewed state
   if (prev.isViewed !== next.isViewed) return false
   if (prev.showViewed !== next.showViewed) return false
-  if (prev.chatId !== next.chatId) return false
+  if (prev.editorLabel !== next.editorLabel) return false
   return true
 }
 
@@ -560,10 +564,39 @@ const FileDiffCard = memo(function FileDiffCard({
   isViewed,
   onToggleViewed,
   showViewed = true,
-  chatId,
+  editorLabel,
+  onOpenInFinder,
+  onOpenInEditor,
+  onOpenInFilePreview,
 }: FileDiffCardProps) {
   const diffCardRef = useRef<HTMLDivElement>(null)
-  const isLargeDiff = file.additions + file.deletions >= LARGE_DIFF_LINE_THRESHOLD
+  const lineCount = file.additions + file.deletions
+  const isLargeDiff = lineCount >= LARGE_DIFF_LINE_THRESHOLD
+  const isLazyDiff = lineCount >= LAZY_DIFF_LINE_THRESHOLD && lineCount < LARGE_DIFF_LINE_THRESHOLD
+  // User must explicitly opt-in to render large-ish diffs
+  const [lazyDiffRevealed, setLazyDiffRevealed] = useState(false)
+
+  // Deferred rendering: when expanding a collapsed file, show a loading placeholder
+  // first, then mount the expensive PatchDiff/FileDiff on the next frame.
+  // Always start false — only set true via effect after expand renders the placeholder.
+  const [diffReady, setDiffReady] = useState(false)
+  const prevCollapsed = useRef(isCollapsed)
+
+  useEffect(() => {
+    // Went from collapsed → expanded: defer the heavy diff render
+    if (prevCollapsed.current && !isCollapsed) {
+      setDiffReady(false)
+      const frame = requestAnimationFrame(() => {
+        setDiffReady(true)
+      })
+      return () => cancelAnimationFrame(frame)
+    }
+    // Went from expanded → collapsed: reset for next expand
+    if (!prevCollapsed.current && isCollapsed) {
+      setDiffReady(false)
+    }
+    prevCollapsed.current = isCollapsed
+  }, [isCollapsed])
 
   // Build FileDiffMetadata from file content (enables clickable "N unmodified lines" sections)
   // Computed whenever fileContent is available, not just when fully expanded
@@ -611,30 +644,6 @@ const FileDiffCard = memo(function FileDiffCard({
     return () => cancelAnimationFrame(frame)
   }, [fileContent, file.diffText, file.oldPath, file.newPath, isLargeDiff])
 
-  // tRPC mutations for file operations
-  const openInFinderMutation = trpcClient.external.openInFinder.mutate
-  const openInEditorMutation = trpcClient.external.openFileInEditor.mutate
-  const openInAppMutation = trpcClient.external.openInApp.mutate
-
-  // Preferred editor
-  const preferredEditor = useAtomValue(preferredEditorAtom)
-  const editorMeta = APP_META[preferredEditor]
-
-  // File viewer (file preview sidebar)
-  const fileViewerAtom = useMemo(
-    () => fileViewerOpenAtomFamily(chatId || ""),
-    [chatId],
-  )
-  const setFileViewerPath = useSetAtom(fileViewerAtom)
-
-  // Diff sidebar state (to close dialog/fullscreen when opening file preview)
-  const diffDisplayMode = useAtomValue(diffViewDisplayModeAtom)
-  const diffSidebarAtom = useMemo(
-    () => diffSidebarOpenAtomFamily(chatId || ""),
-    [chatId],
-  )
-  const setDiffSidebarOpen = useSetAtom(diffSidebarAtom)
-
   // Extract filename and directory from path
   const displayPath =
     file.newPath && file.newPath !== "/dev/null"
@@ -666,30 +675,15 @@ const FileDiffCard = memo(function FileDiffCard({
   }
 
   const handleRevealInFinder = () => {
-    if (absolutePath) {
-      openInFinderMutation(absolutePath)
-    }
-  }
-
-  const handleOpenInEditor = () => {
-    if (absolutePath && worktreePath) {
-      openInEditorMutation({ path: absolutePath, cwd: worktreePath })
-    }
+    if (absolutePath) onOpenInFinder(absolutePath)
   }
 
   const handleOpenInPreferredEditor = () => {
-    if (absolutePath) {
-      openInAppMutation({ path: absolutePath, app: preferredEditor })
-    }
+    if (absolutePath) onOpenInEditor(absolutePath)
   }
 
   const handleOpenInFilePreview = () => {
-    if (absolutePath) {
-      setFileViewerPath(absolutePath)
-      if (diffDisplayMode !== "side-peek") {
-        setDiffSidebarOpen(false)
-      }
-    }
+    if (absolutePath) onOpenInFilePreview(absolutePath)
   }
 
   const handleDiscard = () => {
@@ -898,7 +892,7 @@ const FileDiffCard = memo(function FileDiffCard({
               Open in File Preview
             </ContextMenuItem>
             <ContextMenuItem onClick={handleOpenInPreferredEditor} className="text-xs">
-              Open in {editorMeta.label}
+              Open in {editorLabel}
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
@@ -954,7 +948,7 @@ const FileDiffCard = memo(function FileDiffCard({
                       className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                     >
                       <ExternalLinkIcon className="size-3.5" />
-                      {editorMeta.label}
+                      {editorLabel}
                     </button>
                   </div>
                 )}
@@ -967,6 +961,24 @@ const FileDiffCard = memo(function FileDiffCard({
                 Diff format appears truncated or corrupted. Unable to render
                 this file's changes.
               </span>
+            </div>
+          ) : isLazyDiff && !lazyDiffRevealed ? (
+            <div className="px-3 py-3 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>{lineCount} lines changed — diff hidden for performance</span>
+                <button
+                  type="button"
+                  onClick={() => setLazyDiffRevealed(true)}
+                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium text-foreground bg-muted hover:bg-accent transition-colors"
+                >
+                  Show diff
+                </button>
+              </div>
+            </div>
+          ) : !diffReady ? (
+            <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
+              <IconSpinner className="size-3.5" />
+              <span>Loading diff...</span>
             </div>
           ) : (
             <DiffErrorBoundary fileName={file.newPath || file.oldPath} rawDiff={file.diffText}>
@@ -1147,6 +1159,31 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
         setFileContents(prefetchedFileContents)
       }
     }, [prefetchedFileContents])
+
+    // Lifted atom values — read once in parent, passed as props to all FileDiffCards
+    // This avoids N atom subscriptions (one per card) which cause global re-renders
+    const preferredEditor = useAtomValue(preferredEditorAtom)
+    const editorMeta = APP_META[preferredEditor]
+    const diffDisplayMode = useAtomValue(diffViewDisplayModeAtom)
+    const fileViewerAtom = useMemo(() => fileViewerOpenAtomFamily(chatId), [chatId])
+    const setFileViewerPath = useSetAtom(fileViewerAtom)
+    const diffSidebarAtom = useMemo(() => diffSidebarOpenAtomFamily(chatId), [chatId])
+    const setDiffSidebarOpen = useSetAtom(diffSidebarAtom)
+
+    const handleOpenInFinder = useCallback((path: string) => {
+      trpcClient.external.openInFinder.mutate(path)
+    }, [])
+
+    const handleOpenInEditor = useCallback((path: string) => {
+      trpcClient.external.openInApp.mutate({ path, app: preferredEditor })
+    }, [preferredEditor])
+
+    const handleOpenInFilePreview = useCallback((path: string) => {
+      setFileViewerPath(path)
+      if (diffDisplayMode !== "side-peek") {
+        setDiffSidebarOpen(false)
+      }
+    }, [setFileViewerPath, diffDisplayMode, setDiffSidebarOpen])
 
     // Focused file for scroll-to functionality
     const focusedDiffFile = useAtomValue(agentsFocusedDiffFileAtom)
@@ -1489,25 +1526,32 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
     // Proactively invalidate viewed state when file content changes (hash mismatch)
     // This ensures all consumers of viewedFilesAtomFamily (changes-view, changes-widget)
     // see the correct viewed state, not just agent-diff-view which checks hashes locally
+    // Uses a ref for viewedFiles to avoid re-triggering when we write to the same atom
+    const viewedFilesRef = useRef(viewedFiles)
+    viewedFilesRef.current = viewedFiles
+
     useEffect(() => {
       if (fileDiffs.length === 0) return
 
+      const currentViewed = viewedFilesRef.current
       const keysToInvalidate: string[] = []
       for (const file of fileDiffs) {
-        const viewedState = viewedFiles[file.key]
+        const viewedState = currentViewed[file.key]
         if (viewedState?.viewed && viewedState.contentHash !== hashString(file.diffText)) {
           keysToInvalidate.push(file.key)
         }
       }
 
       if (keysToInvalidate.length > 0) {
-        const updated = { ...viewedFiles }
+        const updated = { ...currentViewed }
         for (const key of keysToInvalidate) {
           updated[key] = { viewed: false, contentHash: "" }
         }
         setViewedFiles(updated)
       }
-    }, [fileDiffs, viewedFiles, setViewedFiles])
+      // Only re-run when fileDiffs change, not when viewedFiles changes
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fileDiffs, setViewedFiles])
 
     // Notify parent when viewed count changes
     const prevViewedCountRef = useRef<number | null>(null)
@@ -1520,77 +1564,20 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks are stable, excluding to prevent loops
     }, [fileDiffs, viewedFiles])
 
-    // Auto-expand all files with lazy batching for performance
-    // Track if we've already initialized the collapsed state for this set of files
-    const prevFileKeysRef = useRef<string>("")
-    const isExpandingRef = useRef(false)
-
-    useEffect(() => {
-      // Generate a unique key for the current file set
-      const currentFileKeys = fileDiffs.map((f) => f.key).join(",")
-
-      // Only update if the file set changed and we're not already expanding
-      if (currentFileKeys !== prevFileKeysRef.current && !isExpandingRef.current) {
-        prevFileKeysRef.current = currentFileKeys
-
-        // For small number of files, expand all at once
-        if (fileDiffs.length <= 10) {
-          startTransition(() => {
-            const expandedState: Record<string, boolean> = {}
-            for (const file of fileDiffs) {
-              expandedState[file.key] = false
-            }
-            setCollapsedByFileKey(expandedState)
-          })
-          return
-        }
-
-        // For many files, expand in batches to avoid UI freeze
-        isExpandingRef.current = true
-        const BATCH_SIZE = 5
-        let currentBatch = 0
-
-        const expandBatch = () => {
-          const start = currentBatch * BATCH_SIZE
-          const end = Math.min(start + BATCH_SIZE, fileDiffs.length)
-
-          if (start >= fileDiffs.length) {
-            isExpandingRef.current = false
-            return
-          }
-
-          startTransition(() => {
-            setCollapsedByFileKey((prev) => {
-              const next = { ...prev }
-              for (let i = start; i < end; i++) {
-                const file = fileDiffs[i]
-                if (file) next[file.key] = false
-              }
-              return next
-            })
-          })
-
-          currentBatch++
-          if (currentBatch * BATCH_SIZE < fileDiffs.length) {
-            // Use requestAnimationFrame for next batch to allow UI to breathe
-            requestAnimationFrame(() => setTimeout(expandBatch, 0))
-          } else {
-            isExpandingRef.current = false
-          }
-        }
-
-        expandBatch()
-      }
-    }, [fileDiffs])
+    // Files start collapsed by default (missing key = collapsed).
+    // No auto-expand — user expands files they want to review.
 
     // Use deferred value to prevent UI blocking during tab switches
     const deferredFileDiffs = useDeferredValue(fileDiffs)
     const isDiffStale = deferredFileDiffs !== fileDiffs
 
-    // Pre-fetch file contents when diff is loaded (for expand functionality)
-    // Delayed to allow UI to render first, then fetch in background
-    // Limited to prevent overwhelming the system with too many parallel requests
+    // Fetch file contents lazily when user expands a file (for expand/full-file functionality)
+    // Debounced to prevent cascading requests when multiple files change state
     const MAX_PREFETCH_FILES = 20
+    const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    // Use a ref to access latest fileContents without adding it as a dependency
+    const fileContentsRef = useRef(fileContents)
+    fileContentsRef.current = fileContents
 
     useEffect(() => {
       // Desktop: use worktreePath, Web: use sandboxId
@@ -1601,92 +1588,102 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       const expandedFiles = fileDiffs.filter((f) => collapsedByFileKey[f.key] === false)
       if (expandedFiles.length === 0) return
 
-      // Skip files we already have content for
+      // Skip files we already have content for (use ref to avoid stale closure)
+      const currentContents = fileContentsRef.current
       const filesToProcess = expandedFiles
-        .filter((file) => !fileContents[file.key] && file.additions + file.deletions < LARGE_DIFF_LINE_THRESHOLD)
+        .filter((file) => !currentContents[file.key] && file.additions + file.deletions < LARGE_DIFF_LINE_THRESHOLD)
         .slice(0, MAX_PREFETCH_FILES)
 
       if (filesToProcess.length === 0) return
 
-      const fetchAllContents = async () => {
-        setIsLoadingFileContents(true)
+      // Debounce: wait 150ms before fetching to avoid cascading requests
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current)
+      fetchTimeoutRef.current = setTimeout(() => {
+        const fetchAllContents = async () => {
+          setIsLoadingFileContents(true)
 
-        try {
-
-          // Build list of files to fetch (filter out /dev/null)
-          const filesToFetch = filesToProcess
-            .map((file) => {
-              const filePath =
-                file.newPath && file.newPath !== "/dev/null"
-                  ? file.newPath
-                  : file.oldPath
-              if (!filePath || filePath === "/dev/null") return null
-              return { key: file.key, filePath }
-            })
-            .filter((f): f is { key: string; filePath: string } => f !== null)
-
-          if (filesToFetch.length === 0) {
-            setIsLoadingFileContents(false)
-            return
-          }
-
-          // Desktop: use batch tRPC call
-          if (worktreePath) {
-            const results =
-              await trpcClient.changes.readMultipleWorkingFiles.query({
-                worktreePath,
-                files: filesToFetch,
+          try {
+            // Build list of files to fetch (filter out /dev/null)
+            const filesToFetch = filesToProcess
+              .map((file) => {
+                const filePath =
+                  file.newPath && file.newPath !== "/dev/null"
+                    ? file.newPath
+                    : file.oldPath
+                if (!filePath || filePath === "/dev/null") return null
+                return { key: file.key, filePath }
               })
+              .filter((f): f is { key: string; filePath: string } => f !== null)
 
-            const newContents: Record<string, string> = {}
-            for (const [key, result] of Object.entries(results)) {
-              if (result.ok) {
-                newContents[key] = result.content
-              }
+            if (filesToFetch.length === 0) {
+              setIsLoadingFileContents(false)
+              return
             }
-            setFileContents(newContents)
-          } else if (sandboxId) {
-            // Sandbox: use remoteApi on desktop, relative fetch on web
-            const results = await Promise.allSettled(
-              filesToFetch.map(async ({ key, filePath }) => {
-                if (isDesktopApp()) {
-                  // Desktop: use signedFetch via remoteApi
-                  const data = await remoteApi.getSandboxFile(sandboxId, filePath)
-                  return { key, content: data.content }
-                } else {
-                  // Web: use relative fetch
-                  const response = await Promise.race([
-                    fetch(
-                      `/api/agents/sandbox/${sandboxId}/files?path=${encodeURIComponent(filePath)}`,
-                    ),
-                    new Promise<never>((_, reject) =>
-                      setTimeout(() => reject(new Error("Timeout")), 5000),
-                    ),
-                  ])
-                  if (!response.ok) throw new Error("Failed to fetch file")
-                  const data = await response.json()
-                  return { key, content: data.content }
+
+            // Desktop: use batch tRPC call
+            if (worktreePath) {
+              const results =
+                await trpcClient.changes.readMultipleWorkingFiles.query({
+                  worktreePath,
+                  files: filesToFetch,
+                })
+
+              const newContents: Record<string, string> = {}
+              for (const [key, result] of Object.entries(results)) {
+                if (result.ok) {
+                  newContents[key] = result.content
                 }
-              }),
-            )
-
-            const newContents: Record<string, string> = {}
-            for (const result of results) {
-              if (result.status === "fulfilled" && result.value?.content) {
-                newContents[result.value.key] = result.value.content
               }
-            }
-            setFileContents(newContents)
-          }
-        } catch (error) {
-          console.error("Failed to prefetch file contents:", error)
-        } finally {
-          setIsLoadingFileContents(false)
-        }
-      }
+              // Merge with existing contents instead of replacing
+              setFileContents(prev => ({ ...prev, ...newContents }))
+            } else if (sandboxId) {
+              // Sandbox: use remoteApi on desktop, relative fetch on web
+              const results = await Promise.allSettled(
+                filesToFetch.map(async ({ key, filePath }) => {
+                  if (isDesktopApp()) {
+                    // Desktop: use signedFetch via remoteApi
+                    const data = await remoteApi.getSandboxFile(sandboxId, filePath)
+                    return { key, content: data.content }
+                  } else {
+                    // Web: use relative fetch
+                    const response = await Promise.race([
+                      fetch(
+                        `/api/agents/sandbox/${sandboxId}/files?path=${encodeURIComponent(filePath)}`,
+                      ),
+                      new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error("Timeout")), 5000),
+                      ),
+                    ])
+                    if (!response.ok) throw new Error("Failed to fetch file")
+                    const data = await response.json()
+                    return { key, content: data.content }
+                  }
+                }),
+              )
 
-      fetchAllContents()
-    }, [fileDiffs, collapsedByFileKey, sandboxId, worktreePath]) // Note: fileContents intentionally not in deps
+              const newContents: Record<string, string> = {}
+              for (const result of results) {
+                if (result.status === "fulfilled" && result.value?.content) {
+                  newContents[result.value.key] = result.value.content
+                }
+              }
+              // Merge with existing contents instead of replacing
+              setFileContents(prev => ({ ...prev, ...newContents }))
+            }
+          } catch (error) {
+            console.error("Failed to prefetch file contents:", error)
+          } finally {
+            setIsLoadingFileContents(false)
+          }
+        }
+
+        fetchAllContents()
+      }, 150)
+
+      return () => {
+        if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current)
+      }
+    }, [fileDiffs, collapsedByFileKey, sandboxId, worktreePath]) // Note: fileContents intentionally not in deps (using ref)
 
     const toggleFileCollapsed = useCallback((fileKey: string) => {
       setCollapsedByFileKey((prev) => ({
@@ -1705,21 +1702,13 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
 
     // Virtualizer for efficient rendering of many files
     // Use deferred file list to prevent UI blocking during updates
+    // estimateSize uses stable values to avoid recalculation storms during expand/collapse
+    // measureElement provides the real size after render
     const virtualizer = useVirtualizer({
       count: deferredFileDiffs.length,
       getScrollElement: () => scrollContainerRef.current,
-      estimateSize: (index) => {
-        const file = deferredFileDiffs[index]
-        if (!file) return COLLAPSED_HEIGHT
-        const isCollapsed = collapsedByFileKey[file.key] !== false
-        if (isCollapsed) {
-          return COLLAPSED_HEIGHT
-        }
-        // Estimate based on line count
-        const lineCount = file.additions + file.deletions
-        return Math.min(Math.max(lineCount * 22 + COLLAPSED_HEIGHT, 150), 800)
-      },
-      overscan: 3, // Reduced overscan for better initial render performance
+      estimateSize: () => COLLAPSED_HEIGHT,
+      overscan: 3,
     })
 
     // Toggle viewed state for a file
@@ -2171,7 +2160,10 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
                         isViewed={isFileViewed(file.key, file.diffText)}
                         onToggleViewed={handleToggleViewed}
                         showViewed={!!worktreePath}
-                        chatId={chatId}
+                        editorLabel={editorMeta.label}
+                        onOpenInFinder={handleOpenInFinder}
+                        onOpenInEditor={handleOpenInEditor}
+                        onOpenInFilePreview={handleOpenInFilePreview}
                       />
                     </div>
                   </div>
