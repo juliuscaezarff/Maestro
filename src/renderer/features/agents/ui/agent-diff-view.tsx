@@ -702,8 +702,6 @@ const FileDiffCard = memo(function FileDiffCard({
     <header
       className={cn(
         "group pl-3 pr-2 py-1 font-mono text-xs bg-muted cursor-pointer",
-        // Sticky header within the scroll container
-        "sticky top-0 z-10",
         "border-b transition-colors",
         "hover:bg-accent",
         isCollapsed ? "border-b-transparent" : "border-b-border",
@@ -1099,13 +1097,17 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
     )
 
     const [diffError, setDiffError] = useState<string | null>(null)
-    // Use local state for collapsed - faster than atom for frequent updates
-    const [collapsedByFileKey, setCollapsedByFileKey] = useState<
-      Record<string, boolean>
-    >({})
-    const [fullExpandedByFileKey, setFullExpandedByFileKey] = useState<
-      Record<string, boolean>
-    >({})
+    // Missing key = collapsed by default; false = explicitly expanded by user
+    const [collapsedByFileKey, setCollapsedByFileKey] = useState<Record<string, boolean>>({})
+    const [fullExpandedByFileKey, setFullExpandedByFileKey] = useState<Record<string, boolean>>({})
+
+    // Derived state pattern: reset collapsed state synchronously during render when new diff arrives.
+    // This avoids useLayoutEffect (which fires after first paint) and prevents any visible flash.
+    const [prevInitialParsedFiles, setPrevInitialParsedFiles] = useState(initialParsedFiles)
+    if (initialParsedFiles !== prevInitialParsedFiles) {
+      setPrevInitialParsedFiles(initialParsedFiles)
+      setCollapsedByFileKey({})
+    }
     const [diffMode, setDiffMode] = useAtom(diffViewModeAtom)
 
     // Discard changes state and mutation
@@ -1410,14 +1412,15 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
     }, [fileDiffs])
 
     // Check if all files are collapsed/expanded
+    // missing key = collapsed (default); false = expanded
     const isAllCollapsed = useCallback(() => {
       if (fileDiffs.length === 0) return true
-      return fileDiffs.every((file) => collapsedByFileKey[file.key] === true)
+      return fileDiffs.every((file) => collapsedByFileKey[file.key] !== false)
     }, [fileDiffs, collapsedByFileKey])
 
     const isAllExpanded = useCallback(() => {
       if (fileDiffs.length === 0) return true
-      return fileDiffs.every((file) => !collapsedByFileKey[file.key])
+      return fileDiffs.every((file) => collapsedByFileKey[file.key] === false)
     }, [fileDiffs, collapsedByFileKey])
 
     // Get count of viewed files (with matching content hash)
@@ -1593,21 +1596,22 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       // Desktop: use worktreePath, Web: use sandboxId
       if (fileDiffs.length === 0 || isLoadingFileContents) return
       if (!worktreePath && !sandboxId) return
-      // Skip if we already have enough contents
-      const existingContentCount = Object.keys(fileContents).length
-      if (
-        existingContentCount >= Math.min(fileDiffs.length, MAX_PREFETCH_FILES)
-      )
-        return
+
+      // Only fetch content for files the user has expanded - lazy loading
+      const expandedFiles = fileDiffs.filter((f) => collapsedByFileKey[f.key] === false)
+      if (expandedFiles.length === 0) return
+
+      // Skip files we already have content for
+      const filesToProcess = expandedFiles
+        .filter((file) => !fileContents[file.key] && file.additions + file.deletions < LARGE_DIFF_LINE_THRESHOLD)
+        .slice(0, MAX_PREFETCH_FILES)
+
+      if (filesToProcess.length === 0) return
 
       const fetchAllContents = async () => {
         setIsLoadingFileContents(true)
 
         try {
-          // Limit files to prefetch to prevent overwhelming the system
-          const filesToProcess = fileDiffs
-            .filter((file) => file.additions + file.deletions < LARGE_DIFF_LINE_THRESHOLD)
-            .slice(0, MAX_PREFETCH_FILES)
 
           // Build list of files to fetch (filter out /dev/null)
           const filesToFetch = filesToProcess
@@ -1682,12 +1686,13 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       }
 
       fetchAllContents()
-    }, [fileDiffs, sandboxId, worktreePath]) // Note: fileContents intentionally not in deps
+    }, [fileDiffs, collapsedByFileKey, sandboxId, worktreePath]) // Note: fileContents intentionally not in deps
 
     const toggleFileCollapsed = useCallback((fileKey: string) => {
       setCollapsedByFileKey((prev) => ({
         ...prev,
-        [fileKey]: !prev[fileKey],
+        // missing key defaults to collapsed (true), so toggle must account for that
+        [fileKey]: !(prev[fileKey] ?? true),
       }))
     }, [])
 
@@ -1706,7 +1711,7 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       estimateSize: (index) => {
         const file = deferredFileDiffs[index]
         if (!file) return COLLAPSED_HEIGHT
-        const isCollapsed = !!collapsedByFileKey[file.key]
+        const isCollapsed = collapsedByFileKey[file.key] !== false
         if (isCollapsed) {
           return COLLAPSED_HEIGHT
         }
@@ -1900,7 +1905,7 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
       if (fileIndex >= 0) {
         // Expand the file if it's collapsed first
         const file = fileDiffs[fileIndex]
-        if (file && collapsedByFileKey[file.key]) {
+        if (file && collapsedByFileKey[file.key] !== false) {
           setCollapsedByFileKey((prev) => ({
             ...prev,
             [file.key]: false,
@@ -2152,7 +2157,7 @@ export const AgentDiffView = forwardRef<AgentDiffViewRef, AgentDiffViewProps>(
                       <FileDiffCard
                         file={file}
                         isLight={isLight}
-                        isCollapsed={!!collapsedByFileKey[file.key]}
+                        isCollapsed={collapsedByFileKey[file.key] !== false}
                         toggleCollapsed={toggleFileCollapsed}
                         isFullExpanded={!!fullExpandedByFileKey[file.key]}
                         toggleFullExpanded={toggleFileFullExpanded}
