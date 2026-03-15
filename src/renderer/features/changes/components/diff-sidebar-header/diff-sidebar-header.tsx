@@ -23,6 +23,8 @@ import {
 import { IconCloseSidebarRight, IconFetch, IconForcePush, IconSpinner, AgentIcon, CircleFilterIcon, IconReview, ExternalLinkIcon } from "../../../../components/ui/icons";
 import { DiffViewModeSwitcher } from "./diff-view-mode-switcher";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useAtom, useAtomValue } from "jotai";
+import { diffActiveTabAtom, diffCommitOpenAtom, diffSelectedFilesForCommitAtomFamily } from "../../../../features/agents/atoms";
 import { HiArrowPath, HiChevronDown } from "react-icons/hi2";
 import { LuGitBranch } from "react-icons/lu";
 import {
@@ -33,6 +35,7 @@ import {
 	ChevronsUpDown,
 	Columns2,
 	Eye,
+	GitCommit,
 	GitMerge,
 	GitPullRequest,
 	MoreHorizontal,
@@ -106,6 +109,9 @@ interface DiffSidebarHeaderProps {
 	// Diff view display mode (side-peek, center-peek, full-page)
 	displayMode?: "side-peek" | "center-peek" | "full-page";
 	onDisplayModeChange?: (mode: "side-peek" | "center-peek" | "full-page") => void;
+	// Commit
+	chatId?: string;
+	onCommitSuccess?: () => void;
 }
 
 function formatTimeSince(date: Date): string {
@@ -155,11 +161,18 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 	isFullscreen = false,
 	displayMode = "side-peek",
 	onDisplayModeChange,
+	chatId,
+	onCommitSuccess,
 }: DiffSidebarHeaderProps) {
 	// Responsive breakpoints - progressive disclosure
 	const isCompact = sidebarWidth < 350;
 	const showViewModeToggle = sidebarWidth >= 450; // Show Split/Unified toggle
 	const showReviewButton = sidebarWidth >= 550; // Show Review button
+
+	// Tab + commit state from atoms
+	const [activeTab, setActiveTab] = useAtom(diffActiveTabAtom);
+	const [commitOpen, setCommitOpen] = useAtom(diffCommitOpenAtom);
+	const selectedFilePaths = useAtomValue(diffSelectedFilesForCommitAtomFamily(chatId || ""));
 
 	const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
@@ -505,6 +518,32 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 						</ContextMenuContent>
 					</ContextMenu>
 				)}
+
+				{/* Tab pills: Changes | History */}
+				<div className="flex items-center gap-0.5 ml-1">
+					<button
+						onClick={() => setActiveTab("changes")}
+						className={cn(
+							"h-6 px-2 text-xs rounded-md transition-colors",
+							activeTab === "changes"
+								? "bg-foreground/10 text-foreground font-medium"
+								: "text-muted-foreground hover:text-foreground hover:bg-foreground/5"
+						)}
+					>
+						Changes
+					</button>
+					<button
+						onClick={() => setActiveTab("history")}
+						className={cn(
+							"h-6 px-2 text-xs rounded-md transition-colors",
+							activeTab === "history"
+								? "bg-foreground/10 text-foreground font-medium"
+								: "text-muted-foreground hover:text-foreground hover:bg-foreground/5"
+						)}
+					>
+						History
+					</button>
+				</div>
 			</div>
 
 			{/* Right side: Review + View mode toggle + Primary action (split button) + Secondary action + Overflow menu */}
@@ -515,6 +554,27 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 					WebkitAppRegion: "no-drag",
 				}}
 			>
+				{/* Commit button - toggles commit drawer in DiffSidebarContent */}
+				{diffStats.hasChanges && activeTab === "changes" && (
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={() => setCommitOpen(!commitOpen)}
+						className={cn(
+							"h-6 px-2 gap-1 text-xs hover:bg-foreground/10",
+							commitOpen && "bg-foreground/10"
+						)}
+					>
+						<GitCommit className="size-3.5" />
+						<span>Commit</span>
+						{selectedFilePaths.length > 0 && (
+							<span className="text-[10px] bg-foreground/10 px-1 rounded font-medium">
+								{selectedFilePaths.length}
+							</span>
+						)}
+					</Button>
+				)}
+
 				{/* Review button - visible when there's enough space */}
 				{showReviewButton && diffStats.hasChanges && onReview && (
 					<Tooltip>
