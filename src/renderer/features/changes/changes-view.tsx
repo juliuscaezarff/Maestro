@@ -15,21 +15,19 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "../../components/ui/alert-dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/ui/tabs";
 import { toast } from "sonner";
 import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { trpc } from "../../lib/trpc";
 import { preferredEditorAtom } from "../../lib/atoms";
 import { APP_META } from "../../../shared/external-apps";
-import { fileViewerOpenAtomFamily, diffViewDisplayModeAtom, diffSidebarOpenAtomFamily, diffActiveTabAtom } from "../agents/atoms";
+import { fileViewerOpenAtomFamily, diffViewDisplayModeAtom, diffSidebarOpenAtomFamily, diffActiveTabAtom, diffSelectedFilesForCommitAtomFamily } from "../agents/atoms";
 import { useChangesStore } from "../../lib/stores/changes-store";
 import { usePRStatus } from "../../hooks/usePRStatus";
 import { useFileChangeListener } from "../../lib/hooks/use-file-change-listener";
 import type { ChangeCategory, ChangedFile } from "../../../shared/changes-types";
 import { cn } from "../../lib/utils";
-import { ChangesFileFilter, type SubChatFilterItem } from "./components/changes-file-filter";
-import { CommitInput } from "./components/commit-input";
+import type { SubChatFilterItem } from "./components/changes-file-filter";
 import { HistoryView, type CommitInfo } from "./components/history-view";
 import { getStatusIndicator } from "./utils/status";
 import { GitPullRequest, Eye } from "lucide-react";
@@ -288,6 +286,7 @@ export function ChangesView({
 
 	// Viewed files state from agents diff view (for showing eye icon and toggling)
 	const [viewedFiles, setViewedFiles] = useAtom(viewedFilesAtomFamily(chatId || ""));
+	const setSelectedFilesForCommit = useSetAtom(diffSelectedFilesForCommitAtomFamily(chatId || ""));
 
 	const { baseBranch } = useChangesStore();
 	const { data: branchData } = trpc.changes.getBranches.useQuery(
@@ -412,8 +411,6 @@ export function ChangesView({
 		? (selectedFilePath ? { path: selectedFilePath } as ChangedFile : null)
 		: (selectedFileState?.file ?? null);
 
-	const [fileFilter, setFileFilter] = useState("");
-	const [subChatFilter, setSubChatFilter] = useState<string | null>(initialSubChatFilter);
 	const [internalActiveTab, setInternalActiveTab] = useState<"changes" | "history">("changes");
 	const activeTab = controlledActiveTab ?? internalActiveTab;
 	const fileListRef = useRef<HTMLDivElement>(null);
@@ -431,11 +428,6 @@ export function ChangesView({
 		}
 	}, [controlledActiveTab, onActiveTabChange, onCommitSelect]);
 
-	// Update subchat filter when initialSubChatFilter changes (e.g., from Review button)
-	useEffect(() => {
-		setSubChatFilter(initialSubChatFilter);
-	}, [initialSubChatFilter]);
-
 	// Local selection state - tracks which files are selected for commit (checkboxes)
 	const [selectedForCommit, setSelectedForCommit] = useState<Set<string>>(new Set());
 	const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
@@ -445,17 +437,13 @@ export function ChangesView({
 	// Anchor for Shift+Click is the currently selected file (selectedFile) - the one showing in diff view
 	const [highlightedFiles, setHighlightedFiles] = useState<Set<string>>(new Set());
 
-	// Reset filters when worktreePath changes, but preserve initialSubChatFilter
+	// Reset state when worktreePath changes
 	useEffect(() => {
-		setFileFilter("");
-		// Don't reset subChatFilter to null - use initialSubChatFilter instead
-		// This preserves the filter when component remounts (e.g., when diff sidebar opens)
-		setSubChatFilter(initialSubChatFilter);
 		setHasInitializedSelection(false);
 		setSelectedForCommit(new Set());
 		setHighlightedFiles(new Set());
 		prevAllPathsRef.current = new Set();
-	}, [worktreePath, initialSubChatFilter]);
+	}, [worktreePath]);
 
 	// Combine all files into a flat list
 	const allFiles = useMemo(() => {
@@ -516,45 +504,8 @@ export function ChangesView({
 		prevAllPathsRef.current = allPaths;
 	}, [allFiles, hasInitializedSelection]);
 
-	// Get file paths for selected subchat filter
-	const subChatFilterPaths = useMemo(() => {
-		if (!subChatFilter) return null;
-		const subChat = subChats.find((sc) => sc.id === subChatFilter);
-		return subChat?.filePaths || null;
-	}, [subChatFilter, subChats]);
-
-	// Apply filters (text filter + subchat filter)
-	const filteredFiles = useMemo(() => {
-		let result = allFiles;
-
-		// Apply subchat filter first
-		if (subChatFilterPaths) {
-			result = result.filter(({ file }) =>
-				subChatFilterPaths.some(
-					(filterPath) =>
-						file.path === filterPath ||
-						file.path.endsWith(filterPath) ||
-						filterPath.endsWith(file.path)
-				)
-			);
-		}
-
-		// Then apply text filter
-		if (fileFilter.trim()) {
-			result = result.filter(({ file }) =>
-				file.path.toLowerCase().includes(fileFilter.toLowerCase())
-			);
-		}
-
-		return result;
-	}, [allFiles, fileFilter, subChatFilterPaths]);
-
-	const filteredCount = filteredFiles.length;
+	const filteredFiles = allFiles;
 	const totalCount = allFiles.length;
-	// Counts for commit selection (checkboxes)
-	const selectedCount = filteredFiles.filter(f => selectedForCommit.has(f.file.path)).length;
-	const allSelected = filteredCount > 0 && selectedCount === filteredCount;
-	const someSelected = selectedCount > 0 && selectedCount < filteredCount;
 	// Count for highlighted files (shift+click selection for discard)
 	const highlightedCount = highlightedFiles.size;
 
@@ -659,29 +610,6 @@ export function ChangesView({
 		toast.success(`Copied ${highlightedPaths.length} paths`);
 	}, [highlightedPaths]);
 
-	// Toggle all files selection
-	const handleSelectAllChange = useCallback(() => {
-		if (allSelected) {
-			// Deselect all filtered files
-			setSelectedForCommit(prev => {
-				const next = new Set(prev);
-				for (const { file } of filteredFiles) {
-					next.delete(file.path);
-				}
-				return next;
-			});
-		} else {
-			// Select all filtered files
-			setSelectedForCommit(prev => {
-				const next = new Set(prev);
-				for (const { file } of filteredFiles) {
-					next.add(file.path);
-				}
-				return next;
-			});
-		}
-	}, [allSelected, filteredFiles]);
-
 	// Keyboard navigation handler for arrow up/down
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
@@ -721,6 +649,11 @@ export function ChangesView({
 			.filter(f => selectedForCommit.has(f.file.path))
 			.map(f => f.file.path);
 	}, [filteredFiles, selectedForCommit]);
+
+	// Sync selected files to atom so DiffSidebarHeader can access them for the Commit popover
+	useEffect(() => {
+		setSelectedFilesForCommit(selectedFilePaths);
+	}, [selectedFilePaths, setSelectedFilesForCommit]);
 
 	// Check if a file is marked as viewed in the diff view
 	// Key format matches agent-diff-view.tsx: `${oldPath}->${newPath}`
@@ -895,122 +828,8 @@ export function ChangesView({
 
 	return (
 			<>
-				<div className="flex flex-col h-full">
-					<Tabs
-						value={activeTab}
-						onValueChange={(v) => {
-							const newTab = v as "changes" | "history";
-							handleActiveTabChange(newTab);
-						}}
-						className="flex flex-col h-full"
-					>
-					{/* Tab triggers */}
-					<TabsList className="h-8 px-2 bg-transparent border-b border-border/50 rounded-none justify-start gap-1 shrink-0">
-						<TabsTrigger
-							value="changes"
-							className="h-6 px-2.5 text-xs rounded-md data-[state=active]:bg-muted data-[state=active]:shadow-none"
-						>
-							Changes
-						</TabsTrigger>
-						<TabsTrigger
-							value="history"
-							className="h-6 px-2.5 text-xs rounded-md data-[state=active]:bg-muted data-[state=active]:shadow-none"
-						>
-							History
-						</TabsTrigger>
-					</TabsList>
-
-					{/* Changes tab content */}
-					<TabsContent value="changes" className="flex-1 flex flex-col m-0 overflow-hidden data-[state=inactive]:hidden">
-						{/* Filter */}
-						<ChangesFileFilter
-							value={fileFilter}
-							onChange={setFileFilter}
-							subChats={subChats}
-							selectedSubChatId={subChatFilter}
-							onSubChatFilterChange={setSubChatFilter}
-						/>
-
-						{/* Select all header */}
-						<div className="flex items-center gap-2 px-2 py-1.5 border-b border-border/50">
-							<Checkbox
-								checked={someSelected ? "indeterminate" : allSelected}
-								onCheckedChange={handleSelectAllChange}
-								className="size-4 border-muted-foreground/50"
-							/>
-							<span className="text-xs text-muted-foreground">
-								{selectedCount} of {totalCount} file{totalCount !== 1 ? "s" : ""} selected
-							</span>
-						</div>
-
-						{/* File list */}
-						{totalCount === 0 ? (
-							<div className="flex-1 flex items-center justify-center text-muted-foreground text-sm px-4 text-center">
-								No changes detected
-							</div>
-						) : filteredCount === 0 ? (
-							<div className="flex-1 flex items-center justify-center text-muted-foreground text-sm px-4 text-center">
-								No files match filter
-							</div>
-						) : (
-							<div
-								ref={fileListRef}
-								className="flex-1 overflow-y-auto outline-none"
-								tabIndex={0}
-								onKeyDown={handleKeyDown}
-							>
-								{filteredFiles.map(({ file, category }, index) => (
-									<ChangesFileItemWithContext
-										key={file.path}
-										file={file}
-										category={category}
-										isSelected={selectedFile?.path === file.path}
-										isChecked={selectedForCommit.has(file.path)}
-										isViewed={isFileMarkedAsViewed(file.path)}
-										isHighlighted={highlightedFiles.has(file.path)}
-										highlightedCount={highlightedCount}
-										highlightedPaths={highlightedPaths}
-										index={index}
-										onSelect={() => {
-											handleFileSelect(file, category);
-											fileListRef.current?.focus();
-										}}
-										onDoubleClick={() => handleFileDoubleClick(file, category)}
-										onCheckboxChange={() => handleCheckboxChange(file.path)}
-										onShiftClick={handleShiftClick}
-										onCopyPath={() => handleCopyPath(file.path)}
-										onCopyRelativePath={() => handleCopyRelativePath(file.path)}
-										onRevealInFinder={() => handleRevealInFinder(file.path)}
-										onOpenInFilePreview={() => handleOpenInFilePreview(file.path)}
-										onOpenInEditor={() => handleOpenInPreferredEditor(file.path)}
-										editorLabel={editorMeta.label}
-										onToggleViewed={() => toggleFileViewed(file.path)}
-										onDiscard={() => setDiscardFile(file)}
-										onDiscardSelected={handleDiscardSelected}
-										onIncludeSelected={handleIncludeSelected}
-										onExcludeSelected={handleExcludeSelected}
-										onCopySelectedPaths={() => handleCopySelectedPaths(worktreePath)}
-										onCopySelectedRelativePaths={handleCopySelectedRelativePaths}
-									/>
-								))}
-							</div>
-						)}
-
-						{/* Commit input */}
-						<CommitInput
-							worktreePath={worktreePath}
-							hasStagedChanges={selectedCount > 0}
-							onRefresh={handleRefresh}
-							onCommitSuccess={handleCommitSuccess}
-							stagedCount={selectedCount}
-							currentBranch={status.branch}
-							selectedFilePaths={selectedFilePaths}
-							chatId={chatId}
-						/>
-					</TabsContent>
-
-					{/* History tab content */}
-					<TabsContent value="history" className="flex-1 flex flex-col m-0 overflow-hidden data-[state=inactive]:hidden">
+				<div className="flex flex-col h-full overflow-hidden">
+					{activeTab === "history" ? (
 						<HistoryView
 							worktreePath={worktreePath}
 							selectedCommitHash={selectedCommitHash}
@@ -1019,9 +838,59 @@ export function ChangesView({
 							onFileSelect={onCommitFileSelect}
 							pushCount={pushCount}
 						/>
-					</TabsContent>
-				</Tabs>
-			</div>
+					) : (
+						<>
+							{/* File list */}
+							{totalCount === 0 ? (
+								<div className="flex-1 flex items-center justify-center text-muted-foreground text-sm px-4 text-center">
+									No changes detected
+								</div>
+							) : (
+								<div
+									ref={fileListRef}
+									className="flex-1 overflow-y-auto outline-none"
+									tabIndex={0}
+									onKeyDown={handleKeyDown}
+								>
+									{filteredFiles.map(({ file, category }, index) => (
+										<ChangesFileItemWithContext
+											key={file.path}
+											file={file}
+											category={category}
+											isSelected={selectedFile?.path === file.path}
+											isChecked={selectedForCommit.has(file.path)}
+											isViewed={isFileMarkedAsViewed(file.path)}
+											isHighlighted={highlightedFiles.has(file.path)}
+											highlightedCount={highlightedCount}
+											highlightedPaths={highlightedPaths}
+											index={index}
+											onSelect={() => {
+												handleFileSelect(file, category);
+												fileListRef.current?.focus();
+											}}
+											onDoubleClick={() => handleFileDoubleClick(file, category)}
+											onCheckboxChange={() => handleCheckboxChange(file.path)}
+											onShiftClick={handleShiftClick}
+											onCopyPath={() => handleCopyPath(file.path)}
+											onCopyRelativePath={() => handleCopyRelativePath(file.path)}
+											onRevealInFinder={() => handleRevealInFinder(file.path)}
+											onOpenInFilePreview={() => handleOpenInFilePreview(file.path)}
+											onOpenInEditor={() => handleOpenInPreferredEditor(file.path)}
+											editorLabel={editorMeta.label}
+											onToggleViewed={() => toggleFileViewed(file.path)}
+											onDiscard={() => setDiscardFile(file)}
+											onDiscardSelected={handleDiscardSelected}
+											onIncludeSelected={handleIncludeSelected}
+											onExcludeSelected={handleExcludeSelected}
+											onCopySelectedPaths={() => handleCopySelectedPaths(worktreePath)}
+											onCopySelectedRelativePaths={handleCopySelectedRelativePaths}
+										/>
+									))}
+								</div>
+							)}
+						</>
+					)}
+				</div>
 
 			{/* Discard confirmation dialog - single file */}
 			<AlertDialog open={!!discardFile} onOpenChange={(open) => !open && setDiscardFile(null)}>
