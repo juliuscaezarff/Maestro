@@ -575,6 +575,20 @@ export const selectedCommitAtom = atom<SelectedCommit>(null)
 // Exposed as atom so external components (e.g. git activity badges) can switch tabs
 export const diffActiveTabAtom = atom<"changes" | "history">("changes")
 
+// Commit popover open state (transient, not persisted)
+export const diffCommitOpenAtom = atom<boolean>(false)
+
+// Selected files for commit per chatId (transient, written by ChangesView)
+const diffSelectedFilesStorageAtom = atom<Record<string, string[]>>({})
+export const diffSelectedFilesForCommitAtomFamily = atomFamily((chatId: string) =>
+  atom(
+    (get) => get(diffSelectedFilesStorageAtom)[chatId] ?? [],
+    (get, set, files: string[]) => {
+      set(diffSelectedFilesStorageAtom, { ...get(diffSelectedFilesStorageAtom), [chatId]: files })
+    }
+  )
+)
+
 // Pending PR message to send to chat
 // Set by ChatView when "Create PR" is clicked, consumed by ChatViewInner
 export const pendingPrMessageAtom = atom<{ message: string; subChatId: string } | null>(null)
