@@ -221,7 +221,7 @@ function reconstructOldContent(
 /**
  * CSS injected into @pierre/diffs Shadow DOM for theme integration.
  */
-const PIERRE_DIFFS_THEME_CSS = `
+export const PIERRE_DIFFS_THEME_CSS = `
   /* Separator expand buttons */
   [data-separator-wrapper] {
     color: hsl(var(--muted-foreground));
