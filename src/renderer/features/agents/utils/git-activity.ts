@@ -14,11 +14,17 @@ export interface GitPrInfo {
 
 export type GitActivity = GitCommitInfo | GitPrInfo
 
+export interface FileEdit {
+  oldStr: string
+  newStr: string
+}
+
 export interface ChangedFileInfo {
   filePath: string
   displayPath: string
   additions: number
   deletions: number
+  edits: FileEdit[]
 }
 
 /**
@@ -149,6 +155,34 @@ export function extractGitActivity(parts: any[]): GitActivity | null {
   return lastPr || lastCommit
 }
 
+/**
+ * Build a unified diff string from a list of edit operations on the same file.
+ * Each edit is an old_string→new_string replacement; we produce one combined diff.
+ */
+export function buildUnifiedDiffFromEdits(filePath: string, edits: FileEdit[]): string {
+  if (edits.length === 0) return ""
+
+  const hunks: string[] = []
+  for (const edit of edits) {
+    const oldLines = edit.oldStr ? edit.oldStr.split("\n") : []
+    const newLines = edit.newStr ? edit.newStr.split("\n") : []
+    const oldCount = oldLines.length
+    const newCount = newLines.length
+
+    let hunkBody = ""
+    for (const line of oldLines) {
+      hunkBody += `-${line}\n`
+    }
+    for (const line of newLines) {
+      hunkBody += `+${line}\n`
+    }
+
+    hunks.push(`@@ -1,${oldCount} +1,${newCount} @@\n${hunkBody}`)
+  }
+
+  return `--- a/${filePath}\n+++ b/${filePath}\n${hunks.join("")}`
+}
+
 function countLines(text: string): number {
   if (!text) return 0
   return text.split("\n").length
@@ -193,21 +227,26 @@ export function extractChangedFiles(parts: any[], projectPath?: string): Changed
     const existing = fileMap.get(filePath)
 
     if (part.type === "tool-Edit") {
-      const oldLines = countLines(part.input?.old_string || "")
-      const newLines = countLines(part.input?.new_string || "")
+      const oldStr: string = part.input?.old_string || ""
+      const newStr: string = part.input?.new_string || ""
+      const oldLines = countLines(oldStr)
+      const newLines = countLines(newStr)
+      const edit: FileEdit = { oldStr, newStr }
       if (existing) {
         existing.additions += newLines
         existing.deletions += oldLines
+        existing.edits.push(edit)
       } else {
-        fileMap.set(filePath, { filePath, displayPath, additions: newLines, deletions: oldLines })
+        fileMap.set(filePath, { filePath, displayPath, additions: newLines, deletions: oldLines, edits: [edit] })
       }
     } else {
-      // tool-Write: all new content = additions
-      const lines = countLines(part.input?.content || "")
+      // tool-Write: all new content = additions (no meaningful diff to show)
+      const content: string = part.input?.content || ""
+      const lines = countLines(content)
       if (existing) {
         existing.additions += lines
       } else {
-        fileMap.set(filePath, { filePath, displayPath, additions: lines, deletions: 0 })
+        fileMap.set(filePath, { filePath, displayPath, additions: lines, deletions: 0, edits: [] })
       }
     }
   }
