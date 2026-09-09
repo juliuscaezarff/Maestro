@@ -11,7 +11,7 @@ export interface WorktreeConfig {
   "setup-worktree"?: string[] | string
 }
 
-export type WorktreeConfigSource = "custom" | "cursor" | "maestro" | null
+export type WorktreeConfigSource = "custom" | "cursor" | "instructor" | null
 
 export interface DetectedWorktreeConfig {
   config: WorktreeConfig | null
@@ -20,7 +20,7 @@ export interface DetectedWorktreeConfig {
 }
 
 const CURSOR_CONFIG_PATH = ".cursor/worktrees.json"
-const ONECODE_CONFIG_PATH = ".maestro/worktree.json"
+const INSTRUCTOR_CONFIG_PATH = ".instructor/worktree.json"
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -42,7 +42,7 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
 
 /**
  * Detect worktree config for a project
- * Priority: custom path > .cursor/worktrees.json > .maestro/worktree.json
+ * Priority: custom path > .cursor/worktrees.json > .instructor/worktree.json
  */
 export async function detectWorktreeConfig(
   projectPath: string,
@@ -68,12 +68,12 @@ export async function detectWorktreeConfig(
     }
   }
 
-  // 3. Check .maestro/worktree.json
-  const onecodePath = join(projectPath, ONECODE_CONFIG_PATH)
-  if (await fileExists(onecodePath)) {
-    const config = await readJsonFile<WorktreeConfig>(onecodePath)
+  // 3. Check .instructor/worktree.json
+  const instructorPath = join(projectPath, INSTRUCTOR_CONFIG_PATH)
+  if (await fileExists(instructorPath)) {
+    const config = await readJsonFile<WorktreeConfig>(instructorPath)
     if (config) {
-      return { config, path: onecodePath, source: "maestro" }
+      return { config, path: instructorPath, source: "instructor" }
     }
   }
 
@@ -88,19 +88,19 @@ export async function getAvailableConfigPaths(
   projectPath: string,
 ): Promise<{
   cursor: { exists: boolean; path: string }
-  onecode: { exists: boolean; path: string }
+  instructor: { exists: boolean; path: string }
 }> {
   const cursorPath = join(projectPath, CURSOR_CONFIG_PATH)
-  const onecodePath = join(projectPath, ONECODE_CONFIG_PATH)
+  const instructorPath = join(projectPath, INSTRUCTOR_CONFIG_PATH)
 
   return {
     cursor: {
       exists: await fileExists(cursorPath),
       path: cursorPath,
     },
-    onecode: {
-      exists: await fileExists(onecodePath),
-      path: onecodePath,
+    instructor: {
+      exists: await fileExists(instructorPath),
+      path: instructorPath,
     },
   }
 }
@@ -112,14 +112,14 @@ export async function getAvailableConfigPaths(
 export async function saveWorktreeConfig(
   projectPath: string,
   config: WorktreeConfig,
-  target: "cursor" | "maestro" | string = "maestro",
+  target: "cursor" | "instructor" | string = "instructor",
 ): Promise<{ success: boolean; path: string; error?: string }> {
   let targetPath: string
 
   if (target === "cursor") {
     targetPath = join(projectPath, CURSOR_CONFIG_PATH)
-  } else if (target === "maestro") {
-    targetPath = join(projectPath, ONECODE_CONFIG_PATH)
+  } else if (target === "instructor") {
+    targetPath = join(projectPath, INSTRUCTOR_CONFIG_PATH)
   } else {
     // Custom path
     targetPath = isAbsolute(target) ? target : join(projectPath, target)
