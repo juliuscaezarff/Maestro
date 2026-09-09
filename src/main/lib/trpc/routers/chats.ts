@@ -15,6 +15,7 @@ import { chats, getDatabase, projects, subChats } from "../../db"
 import {
   createWorktreeForChat,
   fetchGitHubPRStatus,
+  getCurrentBranch,
   getWorktreeDiff,
   removeWorktree,
   sanitizeProjectName,
@@ -278,6 +279,49 @@ export const chatsRouter = router({
         ...(agentProviderByChatId.has(chat.id) ? { linkedAgentProvider: agentProviderByChatId.get(chat.id) } : {}),
       }))
     }),
+
+  /**
+   * Resolve branch labels without changing the persisted `branch` field.
+   * Local-mode chats keep that field null to distinguish them from worktrees.
+   */
+  listDisplayBranches: publicProcedure.query(async () => {
+    const db = getDatabase()
+    const listedChats = db
+      .select({
+        id: chats.id,
+        branch: chats.branch,
+        worktreePath: chats.worktreePath,
+      })
+      .from(chats)
+      .where(isNull(chats.archivedAt))
+      .all()
+
+    const localPaths = [
+      ...new Set(
+        listedChats.flatMap((chat) =>
+          !chat.branch && chat.worktreePath ? [chat.worktreePath] : [],
+        ),
+      ),
+    ]
+    const currentBranchByPath = new Map(
+      await Promise.all(
+        localPaths.map(async (worktreePath) => [
+          worktreePath,
+          await getCurrentBranch(worktreePath),
+        ] as const),
+      ),
+    )
+
+    return Object.fromEntries(
+      listedChats.map((chat) => [
+        chat.id,
+        chat.branch ??
+          (chat.worktreePath
+            ? currentBranchByPath.get(chat.worktreePath) ?? null
+            : null),
+      ]),
+    )
+  }),
 
   /**
    * List archived chats (optionally filter by project)

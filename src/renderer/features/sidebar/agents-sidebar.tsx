@@ -1161,6 +1161,7 @@ interface ChatListSectionProps {
     id: string;
     name: string | null;
     branch: string | null;
+    displayBranch: string | null;
     updatedAt: Date | null;
     projectId: string | null;
     prNumber: number | null;
@@ -1346,7 +1347,7 @@ const ChatListSection = React.memo(function ChatListSection({
               key={chat.id}
               chatId={chat.id}
               chatName={chat.name}
-              chatBranch={chat.branch}
+              chatBranch={chat.displayBranch}
               chatUpdatedAt={chat.updatedAt}
               chatProjectId={chat.projectId ?? ""}
               globalIndex={globalIndex}
@@ -2216,6 +2217,8 @@ export function AgentsSidebar({
 
   // Fetch all local chats (no project filter)
   const { data: localChats } = trpc.chats.list.useQuery({});
+  const { data: displayBranches } =
+    trpc.chats.listDisplayBranches.useQuery(undefined, { staleTime: 30_000 });
 
   // Fetch user's teams (same as web) - always enabled to allow merged list
   const {
@@ -2242,6 +2245,7 @@ export function AgentsSidebar({
       projectId: string | null;
       worktreePath: string | null;
       branch: string | null;
+      displayBranch: string | null;
       baseBranch: string | null;
       prUrl: string | null;
       prNumber: number | null;
@@ -2268,6 +2272,7 @@ export function AgentsSidebar({
           projectId: chat.projectId,
           worktreePath: chat.worktreePath,
           branch: chat.branch,
+          displayBranch: displayBranches?.[chat.id] ?? chat.branch,
           baseBranch: chat.baseBranch,
           prUrl: chat.prUrl,
           prNumber: chat.prNumber,
@@ -2289,6 +2294,7 @@ export function AgentsSidebar({
           projectId: null,
           worktreePath: null,
           branch: chat.meta?.branch ?? null,
+          displayBranch: chat.meta?.branch ?? null,
           baseBranch: null,
           prUrl: null,
           prNumber: null,
@@ -2309,7 +2315,7 @@ export function AgentsSidebar({
     });
 
     return unified;
-  }, [localChats, remoteChats]);
+  }, [displayBranches, localChats, remoteChats]);
 
   // Track open sub-chat changes for reactivity
   const [openSubChatsVersion, setOpenSubChatsVersion] = useState(0);
