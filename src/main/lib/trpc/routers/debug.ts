@@ -4,10 +4,10 @@ import { app, shell } from "electron"
 import { getAuthManager } from "../../../index"
 import { z } from "zod"
 import { clearNetworkCache } from "../../ollama/network-detector"
+import { DESKTOP_PROTOCOL, IS_DEV } from "../../../constants"
 
 // Protocol constant (must match main/index.ts)
-const IS_DEV = !!process.env.ELECTRON_RENDERER_URL
-const PROTOCOL = IS_DEV ? "maestro-dev" : "maestro"
+const PROTOCOL = DESKTOP_PROTOCOL
 
 // Global flag for simulating offline mode (for testing)
 let simulateOfflineMode = false

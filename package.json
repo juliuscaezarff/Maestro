@@ -1,6 +1,6 @@
 {
   "name": "instructor-desktop",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Instructor - UI for parallel work with AI agents",
   "author": {
@@ -146,9 +146,9 @@
     "npmRebuild": true,
     "protocols": [
       {
-        "name": "Maestro",
+        "name": "Instructor",
         "schemes": [
-          "maestro"
+          "instructor"
         ]
       }
     ],
