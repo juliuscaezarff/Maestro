@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/electron/main"
+import { execFileSync } from "child_process"
 import { app, BrowserWindow, Menu, nativeImage, session } from "electron"
 import { existsSync, readFileSync, readlinkSync, unlinkSync } from "fs"
 import { createServer } from "http"
@@ -241,6 +242,45 @@ function registerProtocol(): boolean {
   } else {
     // Production mode
     success = app.setAsDefaultProtocolClient(PROTOCOL)
+
+    // Electron can leave an older development association in place on Windows.
+    // Repair it explicitly so installed and portable builds always receive the
+    // authentication callback instead of launching the repository's Electron.
+    if (
+      process.platform === "win32" &&
+      !app.isDefaultProtocolClient(PROTOCOL)
+    ) {
+      try {
+        const protocolKey = `HKCU\\Software\\Classes\\${PROTOCOL}`
+        const openCommandKey = `${protocolKey}\\shell\\open\\command`
+        const openCommand = `"${process.execPath}" "%1"`
+
+        execFileSync(
+          "reg.exe",
+          ["ADD", protocolKey, "/ve", "/d", `URL:${PROTOCOL}`, "/f"],
+          { windowsHide: true },
+        )
+        execFileSync(
+          "reg.exe",
+          ["ADD", protocolKey, "/v", "URL Protocol", "/d", "", "/f"],
+          { windowsHide: true },
+        )
+        execFileSync(
+          "reg.exe",
+          ["ADD", openCommandKey, "/ve", "/d", openCommand, "/f"],
+          { windowsHide: true },
+        )
+
+        success = app.isDefaultProtocolClient(PROTOCOL)
+        console.log(
+          "[Protocol] Windows stale association repair:",
+          success ? "success" : "failed verification",
+        )
+      } catch (error) {
+        console.error("[Protocol] Windows association repair failed:", error)
+      }
+    }
+
     console.log(
       `[Protocol] Production registration:`,
       success ? "success" : "failed",
