@@ -73,7 +73,7 @@ export function AgentsWorktreesTab() {
   })
 
   // Local state
-  const [saveTarget, setSaveTarget] = useState<"cursor" | "maestro">("maestro")
+  const [saveTarget, setSaveTarget] = useState<"cursor" | "instructor">("instructor")
   const [commands, setCommands] = useState<string[]>([""])
   const [unixCommands, setUnixCommands] = useState<string[]>([])
   const [windowsCommands, setWindowsCommands] = useState<string[]>([])
@@ -92,7 +92,7 @@ export function AgentsWorktreesTab() {
       if (configData.source === "cursor") {
         setSaveTarget("cursor")
       } else {
-        setSaveTarget("maestro")
+        setSaveTarget("instructor")
       }
 
       if (configData.config) {
@@ -256,18 +256,18 @@ export function AgentsWorktreesTab() {
                 <div className="flex-shrink-0 w-auto min-w-56 max-w-80">
                   <Select
                     value={saveTarget}
-                    onValueChange={(v) => setSaveTarget(v as "cursor" | "maestro")}
+                    onValueChange={(v) => setSaveTarget(v as "cursor" | "instructor")}
                   >
                     <SelectTrigger className="w-full">
                       <span className="text-sm font-mono truncate">
                         {saveTarget === "cursor"
                           ? ".cursor/worktrees.json"
-                          : ".maestro/worktree.json"}
+                          : ".instructor/worktree.json"}
                       </span>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="maestro">
-                        .maestro/worktree.json
+                      <SelectItem value="instructor">
+                        .instructor/worktree.json
                       </SelectItem>
                       {cursorExists && (
                         <SelectItem value="cursor">
