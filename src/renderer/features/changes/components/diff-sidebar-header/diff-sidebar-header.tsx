@@ -22,11 +22,11 @@ import {
 } from "../../../../components/ui/tooltip";
 import { IconCloseSidebarRight, IconFetch, IconForcePush, IconSpinner, AgentIcon, CircleFilterIcon, IconReview, ExternalLinkIcon } from "../../../../components/ui/icons";
 import { DiffViewModeSwitcher } from "./diff-view-mode-switcher";
+import { SplitButton } from "../../../../components/ui/split-button";
+import { Tabs, TabsList, TabsTrigger } from "../../../../components/ui/tabs";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { diffActiveTabAtom, diffCommitOpenAtom, diffSelectedFilesForCommitAtomFamily } from "../../../../features/agents/atoms";
-import { HiArrowPath, HiChevronDown } from "react-icons/hi2";
-import { LuGitBranch } from "react-icons/lu";
 import {
 	ArrowDown,
 	ArrowUp,
@@ -35,6 +35,7 @@ import {
 	ChevronsUpDown,
 	Columns2,
 	Eye,
+	GitBranch,
 	GitCommit,
 	GitMerge,
 	GitPullRequest,
@@ -486,14 +487,14 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 
 				{/* Branch name display (branch switching will be added later) */}
 				<div className="h-6 px-2 gap-1 text-xs font-medium min-w-0 flex items-center">
-					<LuGitBranch className="size-3.5 shrink-0 opacity-70" />
+					<GitBranch className="size-3.5 shrink-0 opacity-70" />
 					<span className="truncate max-w-[120px] text-foreground">
 						{currentBranch || "No branch"}
 					</span>
 				</div>
 
-				{/* PR Status badge */}
-				{pr && (
+				{/* PR Status badge - hidden below 350px, least essential element at that width */}
+				{pr && !isCompact && (
 					<ContextMenu>
 						<ContextMenuTrigger asChild>
 							<a
@@ -519,31 +520,23 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 					</ContextMenu>
 				)}
 
-				{/* Tab pills: Changes | History */}
-				<div className="flex items-center gap-0.5 ml-1">
-					<button
-						onClick={() => setActiveTab("changes")}
-						className={cn(
-							"h-6 px-2 text-xs rounded-md transition-colors",
-							activeTab === "changes"
-								? "bg-foreground/10 text-foreground font-medium"
-								: "text-muted-foreground hover:text-foreground hover:bg-foreground/5"
-						)}
-					>
-						Changes
-					</button>
-					<button
-						onClick={() => setActiveTab("history")}
-						className={cn(
-							"h-6 px-2 text-xs rounded-md transition-colors",
-							activeTab === "history"
-								? "bg-foreground/10 text-foreground font-medium"
-								: "text-muted-foreground hover:text-foreground hover:bg-foreground/5"
-						)}
-					>
-						History
-					</button>
-				</div>
+				{/* Changes | History tabs */}
+				<Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "changes" | "history")} className="ml-1">
+					<TabsList className="h-6 p-0.5 gap-0.5 bg-transparent">
+						<TabsTrigger
+							value="changes"
+							className="h-5 px-2 text-xs rounded-md data-[state=active]:bg-foreground/10 data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:font-medium text-muted-foreground hover:text-foreground"
+						>
+							Changes
+						</TabsTrigger>
+						<TabsTrigger
+							value="history"
+							className="h-5 px-2 text-xs rounded-md data-[state=active]:bg-foreground/10 data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:font-medium text-muted-foreground hover:text-foreground"
+						>
+							History
+						</TabsTrigger>
+					</TabsList>
+				</Tabs>
 			</div>
 
 			{/* Right side: Review + View mode toggle + Primary action (split button) + Secondary action + Overflow menu */}
@@ -568,7 +561,7 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 						<GitCommit className="size-3.5" />
 						<span>Commit</span>
 						{selectedFilePaths.length > 0 && (
-							<span className="text-[10px] bg-foreground/10 px-1 rounded font-medium">
+							<span className="text-[10px] bg-foreground/10 px-1 rounded font-medium tabular-nums">
 								{selectedFilePaths.length}
 							</span>
 						)}
@@ -576,7 +569,7 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 				)}
 
 				{/* Review button - visible when there's enough space */}
-				{showReviewButton && diffStats.hasChanges && onReview && (
+				{activeTab === "changes" && showReviewButton && diffStats.hasChanges && onReview && (
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button
@@ -598,123 +591,37 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 					</Tooltip>
 				)}
 
-				{/* Primary action button (solo when Fetch/Open PR, split when Push/Pull/Create PR) */}
-				{displayAction.label === "Fetch" || displayAction.label === "Fetching" || displayAction.label === "Open PR" ? (
-					// Solo button - no dropdown (for Fetch and Open PR)
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<button
-								onClick={displayAction.handler}
-								disabled={displayAction.isPending || displayAction.disabled}
-								className={cn(
-									"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-colors",
-									"outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/70",
-									"disabled:pointer-events-none disabled:opacity-50",
-									"h-6 px-2 gap-1 text-xs rounded-md focus:z-10 overflow-hidden",
-									"transition-all duration-200 ease-out",
-									displayAction.variant === "default"
-										? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] dark:shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-										: "hover:bg-accent hover:text-accent-foreground"
-								)}
-							>
-								<span className="flex items-center gap-1 transition-opacity duration-150 min-w-0">
-									{displayAction.isPending ? (
-										<>
-											<IconSpinner className="size-3.5 ml-0.5 shrink-0" />
-											{displayAction.pendingLabel && <span className="mr-0.5 truncate">{displayAction.pendingLabel}</span>}
-											{displayAction.badge && (
-												<span className="text-[10px] bg-primary-foreground/20 px-1.5 py-0.5 rounded font-medium ml-1 shrink-0">
-													{displayAction.badge}
-												</span>
-											)}
-										</>
-									) : (
-										<>
-											<span className="shrink-0">{displayAction.icon}</span>
-											{displayAction.label && <span className="truncate">{displayAction.label}</span>}
-											{displayAction.badge && (
-												<span className="text-[10px] bg-primary-foreground/20 px-1.5 py-0.5 rounded font-medium ml-1 shrink-0">
-													{displayAction.badge}
-												</span>
-											)}
-										</>
-									)}
-								</span>
-							</button>
-						</TooltipTrigger>
-						<TooltipContent side="bottom">{displayAction.tooltip}</TooltipContent>
-					</Tooltip>
-				) : (
-					// Split button with dropdown for Push/Pull/PR actions
-					<div className="inline-flex -space-x-px rounded-md">
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<button
-									onClick={displayAction.handler}
-									disabled={displayAction.isPending || displayAction.disabled}
-									className={cn(
-										"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-colors",
-										"outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/70",
-										"disabled:pointer-events-none disabled:opacity-50",
-										"h-6 px-2 gap-1 text-xs rounded-l-md rounded-r-none focus:z-10 overflow-hidden",
-										"transition-all duration-200 ease-out",
-										displayAction.variant === "default"
-											? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(255,255,255,0.14)] dark:shadow-[0_0_0_0.5px_rgb(23,23,23),inset_0_0_0_1px_rgba(0,0,0,0.14)]"
-											: "hover:bg-accent hover:text-accent-foreground"
-									)}
-								>
-									<span className="flex items-center gap-1 transition-opacity duration-150 min-w-0">
-										{displayAction.isPending ? (
-											<>
-												<IconSpinner className="size-3.5 ml-0.5 shrink-0" />
-												{displayAction.pendingLabel && <span className="mr-0.5 truncate">{displayAction.pendingLabel}</span>}
-												{displayAction.badge && (
-													<span className="text-[10px] bg-primary-foreground/20 px-1.5 py-0.5 rounded font-medium ml-1 shrink-0">
-														{displayAction.badge}
-													</span>
-												)}
-											</>
-										) : (
-											<>
-												<span className="shrink-0">{displayAction.icon}</span>
-												{displayAction.label && <span className="truncate">{displayAction.label}</span>}
-												{displayAction.badge && (
-													<span className="text-[10px] bg-primary-foreground/20 px-1.5 py-0.5 rounded font-medium ml-1 shrink-0">
-														{displayAction.badge}
-													</span>
-												)}
-											</>
-										)}
-									</span>
-								</button>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">{displayAction.tooltip}</TooltipContent>
-						</Tooltip>
+				{/* Divider between the Commit/Review pair and the sync/action cluster */}
+				{activeTab === "changes" && (diffStats.hasChanges || (showReviewButton && onReview)) && (
+					<div className="w-px h-4 bg-border/50 mx-0.5 shrink-0" />
+				)}
 
-						{/* Dropdown trigger for git operations */}
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									variant={displayAction.variant === "default" ? "default" : "ghost"}
-									size="sm"
-									disabled={displayAction.isPending}
-									className={cn(
-										"h-6 w-6 p-0 rounded-l-none rounded-r-md focus:z-10",
-										displayAction.variant === "ghost" && "hover:bg-accent hover:text-accent-foreground shadow-none"
-									)}
-									aria-label="More git options"
-								>
-									<HiChevronDown className="size-3" />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end" className="w-52">
-								{/* Fetch - available when primary action is NOT Fetch */}
+				{/* Primary git action (Publish/Push/Pull/Create PR/Open PR/Fetch) - shared SplitButton component */}
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<SplitButton
+							label={displayAction.isPending ? (displayAction.pendingLabel || displayAction.label) : displayAction.label}
+							icon={displayAction.isPending ? <IconSpinner className="size-3.5" /> : displayAction.icon}
+							badge={displayAction.badge}
+							onClick={displayAction.handler}
+							disabled={displayAction.isPending || displayAction.disabled}
+							variant={displayAction.variant}
+							size="sm"
+							className="h-6 px-2 text-xs tabular-nums"
+							showDropdown={
+								displayAction.label !== "Fetch" &&
+								displayAction.label !== "Fetching" &&
+								displayAction.label !== "Open PR"
+							}
+							dropdownContent={
+								<>
+									{/* Fetch - available when primary action is NOT Fetch */}
 								<DropdownMenuItem
 									onClick={handleFetch}
 									disabled={isFetchPending}
 									className="text-xs"
 								>
-									<HiArrowPath className={cn("mr-2 size-3.5", isFetchPending && "animate-spin")} />
+									<RefreshCw className={cn("mr-2 size-3.5", isFetchPending && "animate-spin")} />
 									<div className="flex-1">
 										<div>Fetch origin</div>
 										<div className="text-[10px] text-muted-foreground">
@@ -866,12 +773,15 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 										<span>Fix Merge Conflicts</span>
 									</DropdownMenuItem>
 								)}
-							</DropdownMenuContent>
-						</DropdownMenu>
-					</div>
-				)}
+								</>
+							}
+						/>
+					</TooltipTrigger>
+					<TooltipContent side="bottom">{displayAction.tooltip}</TooltipContent>
+				</Tooltip>
 
 				{/* View mode toggle - visible when there's enough space */}
+				{/* TODO: consolidate visual pattern with ViewModeToggle (grouped/tree, components/view-mode-toggle) once that's mounted in this flow */}
 				{showViewModeToggle && onViewModeChange && (
 					<div className="inline-flex rounded-md border border-input">
 						<Button
@@ -914,7 +824,7 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end" className="w-48">
 						{/* Review - shown here when button is hidden */}
-						{!showReviewButton && diffStats.hasChanges && onReview && (
+						{activeTab === "changes" && !showReviewButton && diffStats.hasChanges && onReview && (
 							<DropdownMenuItem
 								onClick={onReview}
 								disabled={isReviewing}
@@ -926,7 +836,7 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 						)}
 
 						{/* Separator only if we have hidden review above */}
-						{(!showReviewButton && diffStats.hasChanges && onReview) && (
+						{(activeTab === "changes" && !showReviewButton && diffStats.hasChanges && onReview) && (
 							<DropdownMenuSeparator />
 						)}
 
