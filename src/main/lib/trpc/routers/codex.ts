@@ -116,7 +116,7 @@ const AUTH_HINTS = [
   "401",
   "403",
 ]
-const DEFAULT_CODEX_MODEL = "gpt-5.3-codex/high"
+const DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
 const CODEX_MCP_TOOLS_FETCH_TIMEOUT_MS = 40_000
 
 const codexMcpListEntrySchema = z
@@ -846,6 +846,12 @@ function preprocessCodexModelName(params: {
   modelId: string
   authConfig?: { apiKey: string }
 }): string {
+  // Migrate the retired UI default used by earlier Instructor builds. The
+  // bundled Codex ACP now advertises gpt-5.6-sol as its current model.
+  if (/^gpt-5\.3-codex(?:\/(?:low|medium|high|xhigh))?$/.test(params.modelId)) {
+    return DEFAULT_CODEX_MODEL
+  }
+
   const hasAppManagedApiKey = Boolean(params.authConfig?.apiKey?.trim())
   if (!hasAppManagedApiKey) {
     return params.modelId

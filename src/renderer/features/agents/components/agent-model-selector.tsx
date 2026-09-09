@@ -46,6 +46,7 @@ type CodexModelOption = {
   id: string
   name: string
   thinkings: CodexThinkingLevel[]
+  thinkingInModelId: boolean
 }
 
 interface AgentModelSelectorProps {
@@ -584,7 +585,7 @@ export function AgentModelSelector({
           {/* Codex thinking level selector with hover sub-menu */}
           {selectedAgentId === "codex" && (() => {
             const selectedCodexModel = codex.models.find((m) => m.id === codex.selectedModelId) || codex.models[0]
-            if (!selectedCodexModel) return null
+            if (!selectedCodexModel?.thinkingInModelId) return null
             return (
               <>
                 <CodexThinkingSubMenu

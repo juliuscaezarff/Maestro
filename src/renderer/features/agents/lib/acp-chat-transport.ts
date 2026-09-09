@@ -15,7 +15,11 @@ import {
   lastSelectedCodexThinkingAtom,
   pendingAuthRetryMessageAtom,
 } from "../atoms"
-import { CODEX_MODELS, type CodexThinkingLevel } from "./models"
+import {
+  CODEX_MODELS,
+  getCodexModelId,
+  type CodexThinkingLevel,
+} from "./models"
 import { useAgentSubChatStore } from "../stores/sub-chat-store"
 import type { AgentMessageMetadata } from "../ui/agent-message-usage"
 
@@ -38,7 +42,7 @@ type ImageAttachment = {
 
 // When a sub-chat hits auth-error, force one fresh Codex ACP session on next send.
 const forceFreshSessionSubChats = new Set<string>()
-const DEFAULT_CODEX_MODEL = "gpt-5.3-codex/high"
+const DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
 function getStoredCodexCredentials(): {
   hasApiKey: boolean
   hasSubscription: boolean
@@ -83,7 +87,7 @@ function getSelectedCodexModel(): string {
   const selectedThinking = appStore.get(lastSelectedCodexThinkingAtom)
   const selectedModel =
     CODEX_MODELS.find((model) => model.id === selectedModelId) ||
-    CODEX_MODELS.find((model) => model.id === "gpt-5.3-codex") ||
+    CODEX_MODELS.find((model) => model.id === "gpt-5.6-sol") ||
     CODEX_MODELS[0]
 
   if (!selectedModel) {
@@ -102,7 +106,7 @@ function getSelectedCodexModel(): string {
     return DEFAULT_CODEX_MODEL
   }
 
-  return `${selectedModel.id}/${normalizedThinking}`
+  return getCodexModelId(selectedModel, normalizedThinking)
 }
 
 export class ACPChatTransport implements ChatTransport<UIMessage> {
