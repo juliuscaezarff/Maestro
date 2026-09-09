@@ -1,6 +1,6 @@
 {
   "name": "instructor-desktop",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "description": "Instructor - UI for parallel work with AI agents",
   "author": {
@@ -253,8 +253,10 @@
       "uninstallerIcon": "build/icon.ico"
     },
     "publish": {
-      "provider": "generic",
-      "url": "https://cdn.21st.dev/releases/desktop"
+      "provider": "github",
+      "owner": "juliuscaezarff",
+      "repo": "instructor",
+      "releaseType": "prerelease"
     }
   },
   "pnpm": {

@@ -25,9 +25,6 @@ function initAutoUpdaterConfig() {
   autoUpdater.autoRunAppAfterInstall = true // Restart app after install
 }
 
-// CDN base URL for updates
-const CDN_BASE = "https://cdn.21st.dev/releases/desktop"
-
 // Minimum interval between update checks (prevent spam on rapid focus/blur)
 const MIN_CHECK_INTERVAL = 60 * 1000 // 1 minute
 let lastCheckTime = 0
@@ -95,23 +92,12 @@ export async function initAutoUpdater(getWindows: () => BrowserWindow[]) {
   // Set update channel from saved preference
   const savedChannel = getSavedChannel()
   autoUpdater.channel = savedChannel
+  // During the 0.x testing phase, GitHub Releases are published as pre-releases.
+  autoUpdater.allowPrerelease = app.getVersion().startsWith("0.")
   // electron-updater auto-sets allowDowngrade=true when channel is changed.
   // We never want to offer a downgrade (e.g. beta 0.0.60-beta.5 when stable is 0.0.62).
   autoUpdater.allowDowngrade = false
   log.info(`[AutoUpdater] Using update channel: ${savedChannel}`)
-
-  // Configure feed URL to point to R2 CDN
-  // Note: We use a custom request headers to bypass CDN cache
-  autoUpdater.setFeedURL({
-    provider: "generic",
-    url: CDN_BASE,
-  })
-
-  // Add cache-busting to update requests
-  autoUpdater.requestHeaders = {
-    "Cache-Control": "no-cache, no-store, must-revalidate",
-    "Pragma": "no-cache",
-  }
 
   // Event: Checking for updates
   autoUpdater.on("checking-for-update", () => {
@@ -180,7 +166,9 @@ export async function initAutoUpdater(getWindows: () => BrowserWindow[]) {
   // Register IPC handlers
   registerIpcHandlers()
 
-  log.info("[AutoUpdater] Initialized with feed URL:", CDN_BASE)
+  log.info(
+    "[AutoUpdater] Initialized with GitHub Releases feed: juliuscaezarff/instructor",
+  )
 }
 
 /**
@@ -188,29 +176,13 @@ export async function initAutoUpdater(getWindows: () => BrowserWindow[]) {
  */
 function registerIpcHandlers() {
   // Check for updates
-  ipcMain.handle("update:check", async (_event, force?: boolean) => {
+  ipcMain.handle("update:check", async () => {
     if (!app.isPackaged) {
       log.info("[AutoUpdater] Skipping update check in dev mode")
       return null
     }
     try {
-      // If force is true, add cache-busting timestamp to URL
-      if (force) {
-        const cacheBuster = `?t=${Date.now()}`
-        autoUpdater.setFeedURL({
-          provider: "generic",
-          url: `${CDN_BASE}${cacheBuster}`,
-        })
-        log.info("[AutoUpdater] Force check with cache-busting:", `${CDN_BASE}${cacheBuster}`)
-      }
       const result = await autoUpdater.checkForUpdates()
-      // Reset feed URL back to normal after force check
-      if (force) {
-        autoUpdater.setFeedURL({
-          provider: "generic",
-          url: CDN_BASE,
-        })
-      }
       return result?.updateInfo || null
     } catch (error) {
       log.error("[AutoUpdater] Check failed:", error)
@@ -245,7 +217,7 @@ function registerIpcHandlers() {
     }
   })
 
-  // Set update channel (latest = stable only, beta = stable + beta)
+  // Set update channel. Pre-releases remain enabled throughout 0.x testing.
   ipcMain.handle("update:set-channel", async (_event, channel: string) => {
     if (channel !== "latest" && channel !== "beta") {
       log.warn(`[AutoUpdater] Invalid channel: ${channel}`)
