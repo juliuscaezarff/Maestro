@@ -13,6 +13,7 @@ import {
   buildUnifiedDiffFromEdits,
   type ChangedFileInfo,
 } from "../utils/git-activity"
+import { DiffMiniBar } from "../../changes/components/diff-stat-badge"
 import {
   selectedProjectAtom,
   diffSidebarOpenAtomFamily,
@@ -28,27 +29,6 @@ import { useCodeTheme } from "../../../lib/hooks/use-code-theme"
 import { getShikiTheme } from "../../../lib/themes/diff-view-highlighter"
 import { useTheme } from "next-themes"
 import { PIERRE_DIFFS_THEME_CSS } from "../../../lib/themes/pierre-diffs"
-
-/** Mini bar chart showing additions/deletions ratio as colored bars */
-function DiffMiniBar({ additions, deletions }: { additions: number; deletions: number }) {
-  const total = additions + deletions
-  if (total === 0) return null
-
-  const maxBars = 5
-  const addBars = Math.max(additions > 0 ? 1 : 0, Math.round((additions / total) * maxBars))
-  const delBars = Math.max(deletions > 0 ? 1 : 0, maxBars - addBars)
-
-  return (
-    <div className="flex items-center gap-px ml-1">
-      {Array.from({ length: addBars }).map((_, i) => (
-        <div key={`a${i}`} className="w-[3px] h-3 rounded-[1px] bg-green-500 dark:bg-green-400" />
-      ))}
-      {Array.from({ length: delBars }).map((_, i) => (
-        <div key={`d${i}`} className="w-[3px] h-3 rounded-[1px] bg-red-500 dark:bg-red-400" />
-      ))}
-    </div>
-  )
-}
 
 function ChevronRight({ className }: { className?: string }) {
   return (
@@ -253,7 +233,7 @@ export const GitActivityBadges = memo(function GitActivityBadges({
             <span className="text-muted-foreground">
               {changedFiles.length} {changedFiles.length === 1 ? "file" : "files"}
             </span>
-            <DiffMiniBar additions={totals.additions} deletions={totals.deletions} />
+            <DiffMiniBar additions={totals.additions} deletions={totals.deletions} className="ml-1" />
             <div className="flex-1" />
             <ChevronRight
               className={cn(
