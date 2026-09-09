@@ -6,6 +6,7 @@ import { AlignJustify, Plus } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { Button } from "../../../components/ui/button"
+import { Logo } from "../../../components/ui/logo"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,10 +47,8 @@ import {
 } from "../atoms"
 import { defaultAgentModeAtom } from "../../../lib/atoms"
 import { ProjectSelector } from "../components/project-selector"
+import { NewChatSuggestions } from "../components/new-chat-suggestions"
 import { WorkModeSelector } from "../components/work-mode-selector"
-// import { selectedTeamIdAtom } from "@/lib/atoms/team"
-import { atom } from "jotai"
-const selectedTeamIdAtom = atom<string | null>(null)
 import {
   agentsSettingsDialogOpenAtom,
   agentsSettingsDialogActiveTabAtom,
@@ -181,7 +180,6 @@ export function NewChatForm({
 }: NewChatFormProps = {}) {
   // UNCONTROLLED: just track if editor has content for send button
   const [hasContent, setHasContent] = useState(false)
-  const [selectedTeamId] = useAtom(selectedTeamIdAtom)
   const [selectedChatId, setSelectedChatId] = useAtom(selectedAgentChatIdAtom)
   const setSelectedChatIsRemote = useSetAtom(selectedChatIsRemoteAtom)
   const setChatSourceMode = useSetAtom(chatSourceModeAtom)
@@ -316,6 +314,93 @@ export function NewChatForm({
       setSelectedAgent(nextAgent)
     }
   }, [enabledAgents, fallbackAgent, lastSelectedAgentId, selectedAgent.id])
+
+  const { data: claudeMcpConfig } = trpc.claude.getAllMcpConfig.useQuery(
+    undefined,
+    {
+      enabled: selectedAgent.id === "claude-code",
+      staleTime: 5 * 60 * 1000,
+    },
+  )
+  const { data: codexMcpConfig } = trpc.codex.getAllMcpConfig.useQuery(
+    undefined,
+    {
+      enabled: selectedAgent.id === "codex",
+      staleTime: 5 * 60 * 1000,
+    },
+  )
+  const { data: installedPlugins = [] } = trpc.plugins.list.useQuery(
+    undefined,
+    { staleTime: 5 * 60 * 1000 },
+  )
+  const enabledPluginIntegrations = useMemo(() => {
+    const enabledPluginNames = installedPlugins
+      .filter((plugin) => !plugin.isDisabled)
+      .map((plugin) =>
+        [plugin.name, plugin.source, ...plugin.components.mcpServers]
+          .join(" ")
+          .toLowerCase(),
+      )
+
+    return {
+      linear: enabledPluginNames.some((name) => name.includes("linear")),
+      github: enabledPluginNames.some((name) => name.includes("github")),
+    }
+  }, [installedPlugins])
+  const connectedIntegrations = useMemo(() => {
+    const config =
+      selectedAgent.id === "codex" ? codexMcpConfig : claudeMcpConfig
+    const groups = config?.groups ?? []
+    const normalizedProjectPath = validatedProject?.path
+      .replace(/\\/g, "/")
+      .replace(/\/$/, "")
+      .toLowerCase()
+
+    const effectiveGroups = [
+      ...groups.filter(
+        (group) => group.projectPath === null || group.groupName === "Global",
+      ),
+      ...groups.filter((group) => {
+        if (!group.projectPath || !normalizedProjectPath) return false
+        return (
+          group.projectPath
+            .replace(/\\/g, "/")
+            .replace(/\/$/, "")
+            .toLowerCase() === normalizedProjectPath
+        )
+      }),
+    ]
+    const effectiveServers = new Map<
+      string,
+      (typeof groups)[number]["mcpServers"][number]
+    >()
+
+    for (const group of effectiveGroups) {
+      for (const server of group.mcpServers ?? []) {
+        if (!server.name) continue
+        effectiveServers.set(server.name.toLowerCase(), server)
+      }
+    }
+
+    const connectedNames = [...effectiveServers.values()]
+      .filter((server) => server.status === "connected")
+      .map((server) => server.name.toLowerCase())
+
+    return {
+      linear:
+        enabledPluginIntegrations.linear ||
+        connectedNames.some((name) => name.includes("linear")),
+      github:
+        enabledPluginIntegrations.github ||
+        connectedNames.some((name) => name.includes("github")),
+    }
+  }, [
+    claudeMcpConfig,
+    codexMcpConfig,
+    enabledPluginIntegrations,
+    selectedAgent.id,
+    validatedProject?.path,
+  ])
 
   // Get available models (with offline support)
   const availableModels = useAvailableModels()
@@ -1601,6 +1686,14 @@ export function NewChatForm({
     }
   }, [])
 
+  const handleSuggestionSelect = useCallback((suggestion: string) => {
+    const currentValue = editorRef.current?.getValue().trim()
+    editorRef.current?.setValue(
+      currentValue ? `${currentValue}\n\n${suggestion}` : suggestion,
+    )
+    requestAnimationFrame(() => editorRef.current?.focus())
+  }, [])
+
   return (
     <div className="flex h-full flex-col relative">
       {/* Header - Simple burger on mobile, AgentsHeaderControls on desktop */}
@@ -1627,13 +1720,16 @@ export function NewChatForm({
         </div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center overflow-y-auto relative">
-        <div className="w-full max-w-2xl space-y-4 md:space-y-6 relative z-10 px-4">
+      <div className="relative flex flex-1 items-start justify-center overflow-y-auto">
+        <div className="relative z-10 w-full max-w-2xl px-4 pb-12 pt-[clamp(2.5rem,9vh,6.5rem)] sm:px-6">
           {/* Title - only show when project is selected */}
           {validatedProject && (
-            <div className="text-center">
-              <h1 className="text-2xl md:text-4xl font-medium tracking-tight">
-                Let's Build
+            <div className="mb-5 sm:mb-6">
+              <div aria-hidden="true" className="mb-4 h-6 w-10">
+                <Logo className="text-foreground" />
+              </div>
+              <h1 className="text-xl font-medium tracking-tight text-foreground sm:text-2xl">
+                Let's build something.
               </h1>
             </div>
           )}
@@ -1641,7 +1737,7 @@ export function NewChatForm({
           {/* Input Area or Select Repo State */}
           {!validatedProject ? (
             // No project selected - show select repo button (like Sign in button)
-            <div className="flex justify-center">
+            <div className="flex justify-center pt-8">
               <button
                 onClick={handleOpenFolder}
                 disabled={openFolder.isPending}
@@ -2187,6 +2283,12 @@ export function NewChatForm({
                   disabledCommands={["clear"]}
                 />
               </div>
+
+              <NewChatSuggestions
+                hasLinear={connectedIntegrations.linear}
+                hasGitHub={connectedIntegrations.github}
+                onSelect={handleSuggestionSelect}
+              />
             </div>
           )}
         </div>
