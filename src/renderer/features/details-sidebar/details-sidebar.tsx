@@ -10,14 +10,12 @@ import { useToolPanel } from "./use-tool-panel"
 import { type ToolId, type ToolTab } from "./tool-panel-state"
 import { InfoSection } from "./sections/info-section"
 import { TodoWidget } from "./sections/todo-widget"
-import { ChangesWidget } from "./sections/changes-widget"
 import { FilesTab } from "./sections/files-tab"
 import { FileViewerSidebar } from "../file-viewer/components/file-viewer-sidebar"
 import {
   diffViewDisplayModeAtom,
   fileViewerDisplayModeAtom,
 } from "../agents/atoms"
-import type { ParsedDiffFile } from "./types"
 
 function EmptyTool({ children }: { children: ReactNode }) {
   return (
@@ -42,29 +40,6 @@ interface DetailsSidebarProps {
   planPath: string | null
   /** Active sub-chat ID for plan */
   activeSubChatId?: string | null
-  /** Diff-related props */
-  canOpenDiff: boolean
-  diffStats?: { additions: number; deletions: number; fileCount: number } | null
-  /** Parsed diff files for file list */
-  parsedFileDiffs?: ParsedDiffFile[] | null
-  /** Callback to commit selected changes */
-  onCommit?: (selectedPaths: string[]) => void
-  /** Callback to commit and push selected changes */
-  onCommitAndPush?: (selectedPaths: string[]) => void
-  /** Whether commit is in progress */
-  isCommitting?: boolean
-  /** Git sync status for push/pull actions */
-  gitStatus?: {
-    pushCount?: number
-    pullCount?: number
-    hasUpstream?: boolean
-  } | null
-  /** Whether git sync status is loading */
-  isGitStatusLoading?: boolean
-  /** Current branch name for header */
-  currentBranch?: string
-  /** Callback when a file is selected in Changes widget - opens diff with file selected */
-  onFileSelect?: (filePath: string) => void
   /** Remote chat info for sandbox workspaces */
   remoteInfo?: {
     repository?: string
@@ -186,43 +161,17 @@ export function DetailsSidebar(props: DetailsSidebarProps) {
           />
         )
       case "diff":
-        return (
-          <>
-            <div className="shrink-0 max-h-[40%] overflow-auto pt-2">
-              <ChangesWidget
-                chatId={chatId}
-                worktreePath={worktreePath}
-                diffStats={props.diffStats}
-                parsedFileDiffs={props.parsedFileDiffs}
-                onCommit={props.onCommit}
-                onCommitAndPush={props.onCommitAndPush}
-                isCommitting={props.isCommitting}
-                pushCount={props.gitStatus?.pushCount ?? 0}
-                pullCount={props.gitStatus?.pullCount ?? 0}
-                hasUpstream={props.gitStatus?.hasUpstream ?? true}
-                isSyncStatusLoading={props.isGitStatusLoading}
-                currentBranch={props.currentBranch}
-                onFileSelect={
-                  props.canOpenDiff ? props.onFileSelect : undefined
-                }
-                diffDisplayMode={diffMode}
-              />
-            </div>
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              {diffMode === "side-peek" ? (
-                diffContent || <EmptyTool>No changes to review.</EmptyTool>
-              ) : (
-                <EmptyTool>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setDiffMode("side-peek")}
-                  >
-                    Show changes in this panel
-                  </Button>
-                </EmptyTool>
-              )}
-            </div>
-          </>
+        return diffMode === "side-peek" ? (
+          diffContent || <EmptyTool>No changes to review.</EmptyTool>
+        ) : (
+          <EmptyTool>
+            <Button
+              variant="ghost"
+              onClick={() => setDiffMode("side-peek")}
+            >
+              Show changes in this panel
+            </Button>
+          </EmptyTool>
         )
     }
   }
