@@ -48,6 +48,28 @@ export function useCommitActions({
 	// Fallback to regular commit for staged changes
 	const commitMutation = trpc.changes.commit.useMutation();
 
+	const generate = useCallback(
+		async (filePaths?: string[]): Promise<string | null> => {
+			if (!chatId) return null;
+			setIsGenerating(true);
+			try {
+				const result = await generateCommitMutation.mutateAsync({
+					chatId,
+					filePaths,
+					ollamaModel: selectedOllamaModel,
+				});
+				onMessageGenerated?.(result.message);
+				return result.message;
+			} catch (error) {
+				toast.error("Failed to generate commit message");
+				return null;
+			} finally {
+				setIsGenerating(false);
+			}
+		},
+		[chatId, generateCommitMutation, selectedOllamaModel, onMessageGenerated],
+	);
+
 	const commit = useCallback(
 		async ({ message, filePaths }: CommitActionInput): Promise<boolean> => {
 			if (!worktreePath) {
@@ -56,27 +78,11 @@ export function useCommitActions({
 			}
 
 			let commitMessage = message?.trim() ?? "";
-			console.log("[CommitActions] commit called, commitMessage:", commitMessage, "chatId:", chatId);
 
 			if (!commitMessage && chatId) {
-				console.log("[CommitActions] No message, generating with AI for files:", filePaths);
-				setIsGenerating(true);
-				try {
-					const result = await generateCommitMutation.mutateAsync({
-						chatId,
-						filePaths,
-						ollamaModel: selectedOllamaModel,
-					});
-					console.log("[CommitActions] AI generated message:", result.message);
-					commitMessage = result.message;
-					onMessageGenerated?.(result.message);
-				} catch (error) {
-					console.error("[CommitActions] Failed to generate message:", error);
-					toast.error("Failed to generate commit message");
-					return false;
-				} finally {
-					setIsGenerating(false);
-				}
+				const generated = await generate(filePaths);
+				if (!generated) return false;
+				commitMessage = generated;
 			}
 
 			if (!commitMessage) {
@@ -104,9 +110,7 @@ export function useCommitActions({
 		[
 			worktreePath,
 			chatId,
-			generateCommitMutation,
-			selectedOllamaModel,
-			onMessageGenerated,
+			generate,
 			atomicCommitMutation,
 			commitMutation,
 			handleSuccess,
@@ -116,5 +120,5 @@ export function useCommitActions({
 
 	const isPending = isGenerating || atomicCommitMutation.isPending || commitMutation.isPending;
 
-	return { commit, isPending, isGenerating };
+	return { commit, generate, isPending, isGenerating };
 }
