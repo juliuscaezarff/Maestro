@@ -21,6 +21,10 @@ export interface SplitButtonProps extends Omit<ButtonProps, "children"> {
 	dropdownContent?: React.ReactNode;
 	/** Whether to show the dropdown trigger */
 	showDropdown?: boolean;
+	/** Optional sizing overrides for the dropdown trigger */
+	dropdownTriggerClassName?: string;
+	/** Accessible label for the dropdown trigger */
+	dropdownAriaLabel?: string;
 }
 
 export function SplitButton({
@@ -30,6 +34,8 @@ export function SplitButton({
 	onClick,
 	dropdownContent,
 	showDropdown = true,
+	dropdownTriggerClassName,
+	dropdownAriaLabel = "More options",
 	disabled,
 	variant = "default",
 	size = "sm",
@@ -57,7 +63,7 @@ export function SplitButton({
 	}
 
 	return (
-		<div className="inline-flex -space-x-px divide-x divide-primary-foreground/30 rounded-lg shadow-sm shadow-black/5">
+		<div className="inline-flex -space-x-px rounded-md shadow-sm shadow-black/5">
 			{/* Main action button */}
 			<Button
 				variant={variant}
@@ -84,8 +90,11 @@ export function SplitButton({
 						variant={variant}
 						size="icon"
 						disabled={disabled}
-						className="rounded-l-none focus:z-10 h-7 w-7"
-						aria-label="More options"
+						className={cn(
+							"rounded-l-none border-l border-primary-foreground/25 focus:z-10",
+							dropdownTriggerClassName,
+						)}
+						aria-label={dropdownAriaLabel}
 					>
 						<ChevronDown className="size-3.5" />
 					</Button>
