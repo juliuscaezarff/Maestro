@@ -608,6 +608,8 @@ export const DiffSidebarHeader = memo(function DiffSidebarHeader({
 							variant={displayAction.variant}
 							size="sm"
 							className="h-6 px-2 text-xs tabular-nums"
+							dropdownTriggerClassName="h-6 w-6"
+							dropdownAriaLabel="More Git actions"
 							showDropdown={
 								displayAction.label !== "Fetch" &&
 								displayAction.label !== "Fetching" &&
