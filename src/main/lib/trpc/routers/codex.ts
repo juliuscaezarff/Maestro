@@ -8,6 +8,10 @@ import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { basename, dirname, join, sep } from "node:path"
 import { z } from "zod"
+import {
+  FALLBACK_CODEX_MODELS,
+  normalizeAdvertisedCodexModels,
+} from "../../../../shared/agent-models"
 import { getClaudeShellEnvironment } from "../../claude/env"
 import { resolveProjectPathFromWorktree } from "../../claude-config"
 import { getDatabase, projects as projectsTable, subChats } from "../../db"
@@ -117,6 +121,7 @@ const AUTH_HINTS = [
   "403",
 ]
 const DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
+const CODEX_MODEL_DISCOVERY_TIMEOUT_MS = 15_000
 const CODEX_MCP_TOOLS_FETCH_TIMEOUT_MS = 40_000
 
 const codexMcpListEntrySchema = z
@@ -1035,6 +1040,70 @@ function cleanupProvider(subChatId: string): void {
 }
 
 export const codexRouter = router({
+  getModels: publicProcedure
+    .input(
+      z
+        .object({
+          authConfig: z
+            .object({
+              apiKey: z.string().min(1),
+            })
+            .optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input }) => {
+      const provider = createACPProvider({
+        command: resolveCodexAcpBinaryPath(),
+        env: buildCodexProviderEnv(input?.authConfig),
+        authMethodId: getCodexAuthMethodId(input?.authConfig),
+        session: {
+          cwd: app.getPath("userData"),
+          mcpServers: [],
+        },
+      })
+
+      try {
+        const session = await Promise.race([
+          provider.initSession(),
+          new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error("Codex model discovery timed out")),
+              CODEX_MODEL_DISCOVERY_TIMEOUT_MS,
+            )
+          }),
+        ])
+        const models = normalizeAdvertisedCodexModels(
+          session.models?.availableModels,
+        )
+        const currentModelId = session.models?.currentModelId ?? null
+        const currentBaseId = currentModelId?.replace(
+          /\/(?:none|minimal|low|medium|high|xhigh|max|ultra)$/,
+          "",
+        )
+        const currentModel = models.find((model) => model.id === currentBaseId)
+        const orderedModels = currentModel
+          ? [currentModel, ...models.filter((model) => model !== currentModel)]
+          : models
+        return {
+          models: orderedModels,
+          currentModelId,
+          source: session.models?.availableModels?.length
+            ? ("provider" as const)
+            : ("fallback" as const),
+        }
+      } catch (error) {
+        console.warn("[codex-models] Provider discovery failed:", error)
+        return {
+          models: FALLBACK_CODEX_MODELS,
+          currentModelId: null,
+          source: "fallback" as const,
+        }
+      } finally {
+        provider.cleanup()
+      }
+    }),
+
   getIntegration: publicProcedure.query(async () => {
     const result = await runCodexCli(["login", "status"])
     const combinedOutput = [result.stdout, result.stderr]
