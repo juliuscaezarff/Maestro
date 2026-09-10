@@ -16,7 +16,7 @@ import {
   type CustomClaudeConfig,
 } from "../../../lib/atoms"
 import { ClaudeCodeIcon, CodexIcon, SearchIcon } from "../../ui/icons"
-import { CLAUDE_MODELS, CODEX_MODELS } from "../../../features/agents/lib/models"
+import { useAvailableAgentModels } from "../../../features/agents/hooks/use-available-agent-models"
 import { trpc } from "../../../lib/trpc"
 import { Badge } from "../../ui/badge"
 import { Button } from "../../ui/button"
@@ -261,6 +261,7 @@ function AnthropicAccountsSection() {
 }
 
 export function AgentsModelsTab() {
+  const availableModels = useAvailableAgentModels()
   const [storedConfig, setStoredConfig] = useAtom(customClaudeConfigAtom)
   const [model, setModel] = useState(storedConfig.model)
   const [baseUrl, setBaseUrl] = useState(storedConfig.baseUrl)
@@ -486,14 +487,14 @@ export function AgentsModelsTab() {
   // All models merged into one list for the top section
   const allModels = useMemo(() => {
     const items: { id: string; name: string; provider: "claude" | "codex" }[] = []
-    for (const m of CLAUDE_MODELS) {
-      items.push({ id: m.id, name: `${m.name} ${m.version}`, provider: "claude" })
+    for (const m of availableModels.models) {
+      items.push({ id: m.id, name: [m.name, m.version].filter(Boolean).join(" "), provider: "claude" })
     }
-    for (const m of CODEX_MODELS) {
+    for (const m of availableModels.codexModels) {
       items.push({ id: m.id, name: m.name, provider: "codex" })
     }
     return items
-  }, [])
+  }, [availableModels.codexModels, availableModels.models])
 
   const [modelSearch, setModelSearch] = useState("")
   const filteredModels = useMemo(() => {
