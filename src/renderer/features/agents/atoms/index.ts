@@ -1,6 +1,11 @@
 import { atom } from "jotai"
 import { atomFamily, atomWithStorage } from "jotai/utils"
 import { atomWithWindowStorage } from "../../../lib/window-storage"
+import {
+  FALLBACK_CODEX_MODELS,
+  type CodexModelOption,
+  type CodexThinkingLevel,
+} from "../../../../shared/agent-models"
 import type { FileMentionOption } from "../mentions/agents-mentions-editor"
 
 // Agent mode type - extensible for future modes like "debug"
@@ -225,13 +230,17 @@ export const lastSelectedCodexModelIdAtom = atomWithStorage<string>(
   { getOnInit: true },
 )
 
-export const lastSelectedCodexThinkingAtom = atomWithStorage<
-  "low" | "medium" | "high" | "xhigh"
->(
+export const lastSelectedCodexThinkingAtom = atomWithStorage<CodexThinkingLevel>(
   "agents:lastSelectedCodexThinking",
   "high",
   undefined,
   { getOnInit: true },
+)
+
+// Runtime catalog shared with the non-React chat transport. The renderer hook
+// refreshes this after provider discovery so sending uses the same model the UI shows.
+export const availableCodexModelsAtom = atom<CodexModelOption[]>(
+  FALLBACK_CODEX_MODELS,
 )
 
 // Storage for all sub-chat modes (persisted per subChatId)
