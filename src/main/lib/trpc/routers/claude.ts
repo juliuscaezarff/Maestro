@@ -5,6 +5,7 @@ import * as fs from "fs/promises"
 import * as os from "os"
 import path from "path"
 import { z } from "zod"
+import { FALLBACK_CLAUDE_MODELS } from "../../../../shared/agent-models"
 import { setConnectionMethod } from "../../analytics"
 import {
   buildClaudeEnv,
@@ -257,6 +258,8 @@ const getClaudeQuery = async () => {
   cachedClaudeQuery = sdk.query
   return cachedClaudeQuery
 }
+
+const CLAUDE_MODEL_DISCOVERY_TIMEOUT_MS = 15_000
 
 // Active sessions for cancellation (onAbort handles stash + abort + restore)
 // Active sessions for cancellation
@@ -775,6 +778,90 @@ export async function getAllMcpConfigHandler() {
 }
 
 export const claudeRouter = router({
+  getModels: publicProcedure
+    .input(
+      z
+        .object({
+          customConfig: z
+            .object({
+              model: z.string().min(1),
+              token: z.string().min(1),
+              baseUrl: z.string().min(1),
+            })
+            .optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input }) => {
+      const claudeCodeToken = getClaudeCodeToken()
+      const claudeEnv = buildClaudeEnv({
+        ...(input?.customConfig && {
+          customEnv: {
+            ANTHROPIC_AUTH_TOKEN: input.customConfig.token,
+            ANTHROPIC_BASE_URL: input.customConfig.baseUrl,
+          },
+        }),
+        enableTasks: false,
+      })
+      const hasExistingApiConfig = Boolean(
+        claudeEnv.ANTHROPIC_API_KEY || claudeEnv.ANTHROPIC_BASE_URL,
+      )
+      const configDir = path.join(app.getPath("userData"), "claude-model-discovery")
+
+      try {
+        await fs.mkdir(configDir, { recursive: true })
+        const claudeQuery = await getClaudeQuery()
+        const abortController = new AbortController()
+        const queryInstance = claudeQuery({
+          prompt: "",
+          options: {
+            abortController,
+            cwd: app.getPath("userData"),
+            env: {
+              ...claudeEnv,
+              ...(claudeCodeToken &&
+                !hasExistingApiConfig && {
+                  CLAUDE_CODE_OAUTH_TOKEN: claudeCodeToken,
+                }),
+              CLAUDE_CONFIG_DIR: configDir,
+            },
+            pathToClaudeCodeExecutable: getBundledClaudeBinaryPath(),
+          },
+        })
+
+        try {
+          const advertised = await Promise.race([
+            queryInstance.supportedModels(),
+            new Promise<never>((_, reject) => {
+              setTimeout(
+                () => reject(new Error("Claude model discovery timed out")),
+                CLAUDE_MODEL_DISCOVERY_TIMEOUT_MS,
+              )
+            }),
+          ])
+          if (!advertised.length) {
+            return { models: FALLBACK_CLAUDE_MODELS, source: "fallback" as const }
+          }
+
+          return {
+            models: advertised.map((model) => ({
+              id: model.value,
+              name: model.displayName,
+              version: "",
+              description: model.description,
+            })),
+            source: "provider" as const,
+          }
+        } finally {
+          abortController.abort()
+          queryInstance.close()
+        }
+      } catch (error) {
+        console.warn("[claude-models] SDK discovery failed:", error)
+        return { models: FALLBACK_CLAUDE_MODELS, source: "fallback" as const }
+      }
+    }),
+
   /**
    * Stream chat with Claude - single subscription handles everything
    */
