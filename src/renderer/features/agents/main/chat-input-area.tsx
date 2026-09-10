@@ -48,7 +48,6 @@ import {
   hiddenModelsAtom,
   normalizeCustomClaudeConfig,
   selectedOllamaModelAtom,
-  showOfflineModeFeaturesAtom,
 } from "../../../lib/atoms"
 import { trpc } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
@@ -70,11 +69,8 @@ import {
   clearSubChatDraft,
   saveSubChatDraftWithAttachments,
 } from "../lib/drafts"
-import {
-  CLAUDE_MODELS,
-  CODEX_MODELS,
-  type CodexThinkingLevel,
-} from "../lib/models"
+import { resolveAvailableModel, type CodexThinkingLevel } from "../lib/models"
+import { useAvailableAgentModels } from "../hooks/use-available-agent-models"
 import type { DiffTextContext, SelectedTextContext } from "../lib/queue-utils"
 import {
   AgentsFileMention,
@@ -100,44 +96,6 @@ import {
 import { getResolvedHotkey } from "../../../lib/hotkeys"
 import { customHotkeysAtom } from "../../../lib/atoms"
 import { toast } from "sonner"
-
-// Hook to get available models (including offline models if Ollama is available and debug enabled)
-function useAvailableModels() {
-  const showOfflineFeatures = useAtomValue(showOfflineModeFeaturesAtom)
-  const { data: ollamaStatus } = trpc.ollama.getStatus.useQuery(undefined, {
-    refetchInterval: showOfflineFeatures ? 30000 : false,
-    enabled: showOfflineFeatures, // Only query Ollama when offline mode is enabled
-  })
-
-  const baseModels = CLAUDE_MODELS
-
-  const isOffline = ollamaStatus ? !ollamaStatus.internet.online : false
-  const hasOllama = ollamaStatus?.ollama.available && (ollamaStatus.ollama.models?.length ?? 0) > 0
-  const ollamaModels = ollamaStatus?.ollama.models || []
-  const recommendedModel = ollamaStatus?.ollama.recommendedModel
-
-  // Only show offline models if:
-  // 1. Debug flag is enabled (showOfflineFeatures)
-  // 2. Ollama is available with models
-  // 3. User is actually offline
-  if (showOfflineFeatures && hasOllama && isOffline) {
-    return {
-      models: baseModels,
-      ollamaModels,
-      recommendedModel,
-      isOffline,
-      hasOllama: true,
-    }
-  }
-
-  return {
-    models: baseModels,
-    ollamaModels: [] as string[],
-    recommendedModel: undefined as string | undefined,
-    isOffline,
-    hasOllama: false,
-  }
-}
 
 export interface ChatInputAreaProps {
   // Editor ref - passed from parent for external access
@@ -453,18 +411,28 @@ export const ChatInputArea = memo(function ChatInputArea({
     lastSelectedCodexThinkingAtom,
   )
   const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom)
-  const availableModels = useAvailableModels()
+  const availableModels = useAvailableAgentModels()
   const [selectedModel, setSelectedModel] = useState(
-    () => availableModels.models.find((m) => m.id === lastSelectedModelId) || availableModels.models[0],
+    () => resolveAvailableModel(availableModels.models, lastSelectedModelId),
   )
 
   // Sync selectedModel when atom value changes (e.g., after localStorage hydration)
   useEffect(() => {
-    const model = availableModels.models.find((m) => m.id === lastSelectedModelId)
-    if (model && model.id !== selectedModel.id) {
+    const storedModel = availableModels.models.find((m) => m.id === lastSelectedModelId)
+    const model = resolveAvailableModel(availableModels.models, lastSelectedModelId)
+    if (model && model.id !== selectedModel?.id) {
       setSelectedModel(model)
     }
-  }, [lastSelectedModelId])
+    if (!availableModels.isLoading && !storedModel && model) {
+      setLastSelectedModelId(model.id)
+    }
+  }, [
+    availableModels.isLoading,
+    availableModels.models,
+    lastSelectedModelId,
+    selectedModel?.id,
+    setLastSelectedModelId,
+  ])
 
   const hiddenModels = useAtomValue(hiddenModelsAtom)
 
@@ -476,16 +444,15 @@ export const ChatInputArea = memo(function ChatInputArea({
     trpc.claudeCode.getIntegration.useQuery()
   const codexUiModels = useMemo(
     () => {
-      return CODEX_MODELS.filter((model) => !hiddenModels.includes(model.id))
+      return availableModels.codexModels.filter((model) => !hiddenModels.includes(model.id))
     },
-    [hiddenModels],
+    [availableModels.codexModels, hiddenModels],
   )
   const selectedCodexModel = useMemo(
     () =>
-      codexUiModels.find((model) => model.id === lastSelectedCodexModelId) ||
-      codexUiModels[0] ||
-      CODEX_MODELS[0]!,
-    [codexUiModels, lastSelectedCodexModelId],
+      resolveAvailableModel(codexUiModels, lastSelectedCodexModelId) ||
+      availableModels.codexModels[0]!,
+    [availableModels.codexModels, codexUiModels, lastSelectedCodexModelId],
   )
 
   const selectedCodexThinking = useMemo<CodexThinkingLevel>(() => {
@@ -503,6 +470,21 @@ export const ChatInputArea = memo(function ChatInputArea({
 
     return selectedCodexModel.thinkings[0]!
   }, [selectedCodexModel, lastSelectedCodexThinking])
+
+  useEffect(() => {
+    if (
+      !availableModels.isLoading &&
+      !codexUiModels.some((model) => model.id === lastSelectedCodexModelId)
+    ) {
+      setLastSelectedCodexModelId(selectedCodexModel.id)
+    }
+  }, [
+    availableModels.isLoading,
+    codexUiModels,
+    lastSelectedCodexModelId,
+    selectedCodexModel.id,
+    setLastSelectedCodexModelId,
+  ])
 
   useEffect(() => {
     if (
