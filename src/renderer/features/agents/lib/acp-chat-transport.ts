@@ -11,15 +11,12 @@ import {
 import { appStore } from "../../../lib/jotai-store"
 import { trpcClient } from "../../../lib/trpc"
 import {
+  availableCodexModelsAtom,
   lastSelectedCodexModelIdAtom,
   lastSelectedCodexThinkingAtom,
   pendingAuthRetryMessageAtom,
 } from "../atoms"
-import {
-  CODEX_MODELS,
-  getCodexModelId,
-  type CodexThinkingLevel,
-} from "./models"
+import { getCodexModelId, type CodexThinkingLevel } from "./models"
 import { useAgentSubChatStore } from "../stores/sub-chat-store"
 import type { AgentMessageMetadata } from "../ui/agent-message-usage"
 
@@ -85,10 +82,11 @@ async function resolveCodexCredentialsForAuthError(): Promise<{
 function getSelectedCodexModel(): string {
   const selectedModelId = appStore.get(lastSelectedCodexModelIdAtom)
   const selectedThinking = appStore.get(lastSelectedCodexThinkingAtom)
+  const availableModels = appStore.get(availableCodexModelsAtom)
   const selectedModel =
-    CODEX_MODELS.find((model) => model.id === selectedModelId) ||
-    CODEX_MODELS.find((model) => model.id === "gpt-5.6-sol") ||
-    CODEX_MODELS[0]
+    availableModels.find((model) => model.id === selectedModelId) ||
+    availableModels.find((model) => model.id === "gpt-5.6-sol") ||
+    availableModels[0]
 
   if (!selectedModel) {
     return DEFAULT_CODEX_MODEL
